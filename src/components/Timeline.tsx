@@ -45,8 +45,8 @@ export const Timeline = ({
   const [resizing, setResizing] = useState<{ itemId: string; edge: 'left' | 'right' } | null>(null);
   const [scrollLeft, setScrollLeft] = useState(0);
   const [initialItemsForDrag, setInitialItemsForDrag] = useState<TimelineItem[] | null>(null);
-  const [snapThreshold] = useState(40); // pixels for snapping - più generoso
-  const [visualSnapThreshold] = useState(60); // pixels for showing snap lines - ancora più generoso
+  const [snapThreshold] = useState(58); // pixels for snapping - quasi uguale alla soglia visuale
+  const [visualSnapThreshold] = useState(60); // pixels for showing snap lines
   const [activeSnapLines, setActiveSnapLines] = useState<number[]>([]);
 
   // Stati per il drag ottimizzato
