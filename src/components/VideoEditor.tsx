@@ -54,6 +54,10 @@ export const VideoEditor = () => {
     setTimelineItems(prev => [...prev, item]);
   };
 
+  const handleTimelineItemsChange = (items: TimelineItem[]) => {
+    setTimelineItems(items);
+  };
+
   const handleExport = () => {
     toast({
       title: "Export Started",
@@ -138,7 +142,7 @@ export const VideoEditor = () => {
           items={timelineItems}
           currentTime={currentTime}
           onTimeChange={setCurrentTime}
-          onItemsChange={setTimelineItems}
+          onItemsChange={handleTimelineItemsChange}
           totalDuration={totalDuration}
         />
       </div>

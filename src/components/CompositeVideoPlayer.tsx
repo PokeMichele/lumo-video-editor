@@ -11,7 +11,6 @@ interface CompositeVideoPlayerProps {
   isPlaying: boolean;
   onTimeUpdate: (time: number) => void;
   onPlayStateChange: (playing: boolean) => void;
-  totalDuration: number;
 }
 
 export const CompositeVideoPlayer = ({
@@ -19,17 +18,17 @@ export const CompositeVideoPlayer = ({
   currentTime,
   isPlaying,
   onTimeUpdate,
-  onPlayStateChange,
-  totalDuration
+  onPlayStateChange
 }: CompositeVideoPlayerProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const hiddenVideoContainerRef = useRef<HTMLDivElement>(null);
   const animationFrameRef = useRef<number | null>(null);
   const videoElementsRef = useRef<Map<string, HTMLVideoElement>>(new Map());
   const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
   const imageElementsRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const [volume, setVolume] = useState(100);
-  const [isSeeking, setIsSeeking] = useState(false);
-  const lastUpdateTimeRef = useRef(0);
+  const [userInteracted, setUserInteracted] = useState(false);
+  const lastTimeRef = useRef(currentTime);
 
   // Trova tutti gli elementi attivi al tempo corrente
   const getActiveItems = useCallback(() => {
@@ -41,27 +40,44 @@ export const CompositeVideoPlayer = ({
 
   // Precarica e gestisce elementi media
   useEffect(() => {
+    const container = hiddenVideoContainerRef.current;
+    if (!container) return;
+
     timelineItems.forEach(item => {
       if (item.mediaFile.type === 'video' && item.mediaFile.url) {
         if (!videoElementsRef.current.has(item.id)) {
           const video = document.createElement('video');
           video.src = item.mediaFile.url;
           video.crossOrigin = 'anonymous';
-          video.muted = false; // IMPORTANTE: Non muto per sentire l'audio
+          video.muted = !userInteracted; // Inizia muted per permettere autoplay
           video.volume = volume / 100;
+          video.style.display = 'none';
           video.preload = 'metadata';
-          video.load();
+
+          // Aggiungi al DOM nascosto per permettere riproduzione audio
+          container.appendChild(video);
           videoElementsRef.current.set(item.id, video);
+
+          video.addEventListener('loadedmetadata', () => {
+            console.log(`Video loaded: ${item.mediaFile.name}, duration: ${video.duration}`);
+          });
         }
       } else if (item.mediaFile.type === 'audio' && item.mediaFile.url) {
         if (!audioElementsRef.current.has(item.id)) {
           const audio = document.createElement('audio');
           audio.src = item.mediaFile.url;
           audio.crossOrigin = 'anonymous';
+          audio.muted = !userInteracted;
           audio.volume = volume / 100;
           audio.preload = 'metadata';
-          audio.load();
+
+          // Aggiungi al DOM nascosto
+          container.appendChild(audio);
           audioElementsRef.current.set(item.id, audio);
+
+          audio.addEventListener('loadedmetadata', () => {
+            console.log(`Audio loaded: ${item.mediaFile.name}, duration: ${audio.duration}`);
+          });
         }
       } else if (item.mediaFile.type === 'image' && item.mediaFile.url) {
         if (!imageElementsRef.current.has(item.id)) {
@@ -72,86 +88,65 @@ export const CompositeVideoPlayer = ({
         }
       }
     });
+  }, [timelineItems, volume, userInteracted]);
 
-    // Cleanup elements that are no longer in timeline
-    const currentItemIds = new Set(timelineItems.map(item => item.id));
-
-    videoElementsRef.current.forEach((video, id) => {
-      if (!currentItemIds.has(id)) {
-        video.pause();
-        video.src = '';
-        videoElementsRef.current.delete(id);
-      }
-    });
-
-    audioElementsRef.current.forEach((audio, id) => {
-      if (!currentItemIds.has(id)) {
-        audio.pause();
-        audio.src = '';
-        audioElementsRef.current.delete(id);
-      }
-    });
-
-    imageElementsRef.current.forEach((img, id) => {
-      if (!currentItemIds.has(id)) {
-        imageElementsRef.current.delete(id);
-      }
-    });
-  }, [timelineItems, volume]);
-
-  // Sincronizza media con tempo corrente
-  const syncMediaElements = useCallback(() => {
+  // Gestisci il play/pause e la sincronizzazione dei media
+  useEffect(() => {
     const activeItems = getActiveItems();
-    const tolerance = 0.2; // Tolleranza di sincronizzazione in secondi
 
-    // Gestisci video
+    // Gestisci i video
     videoElementsRef.current.forEach((video, itemId) => {
       const item = activeItems.find(item => item.id === itemId);
       if (item) {
         const relativeTime = currentTime - item.startTime;
 
-        // Sincronizza solo se necessario per evitare interruzioni audio
-        if (Math.abs(video.currentTime - relativeTime) > tolerance && !isSeeking) {
+        // Sincronizza il tempo se necessario
+        if (Math.abs(video.currentTime - relativeTime) > 0.1) {
           video.currentTime = relativeTime;
         }
 
-        if (isPlaying && video.paused) {
-          video.play().catch(e => console.warn('Video play failed:', e));
-        } else if (!isPlaying && !video.paused) {
+        if (isPlaying && userInteracted) {
+          video.muted = false;
+          video.volume = volume / 100;
+          video.play().catch(e => {
+            console.warn('Video play failed:', e);
+            // Fallback: prova a riprodurre muted
+            video.muted = true;
+            video.play().catch(err => console.warn('Muted video play failed:', err));
+          });
+        } else {
           video.pause();
         }
       } else {
-        // Video non attivo
-        if (!video.paused) {
-          video.pause();
-        }
+        video.pause();
       }
     });
 
-    // Gestisci audio
+    // Gestisci gli audio
     audioElementsRef.current.forEach((audio, itemId) => {
       const item = activeItems.find(item => item.id === itemId);
       if (item) {
         const relativeTime = currentTime - item.startTime;
 
-        // Sincronizza solo se necessario
-        if (Math.abs(audio.currentTime - relativeTime) > tolerance && !isSeeking) {
+        // Sincronizza il tempo se necessario
+        if (Math.abs(audio.currentTime - relativeTime) > 0.1) {
           audio.currentTime = relativeTime;
         }
 
-        if (isPlaying && audio.paused) {
-          audio.play().catch(e => console.warn('Audio play failed:', e));
-        } else if (!isPlaying && !audio.paused) {
+        if (isPlaying && userInteracted) {
+          audio.muted = false;
+          audio.volume = volume / 100;
+          audio.play().catch(e => {
+            console.warn('Audio play failed:', e);
+          });
+        } else {
           audio.pause();
         }
       } else {
-        // Audio non attivo
-        if (!audio.paused) {
-          audio.pause();
-        }
+        audio.pause();
       }
     });
-  }, [currentTime, isPlaying, getActiveItems, isSeeking]);
+  }, [isPlaying, getActiveItems, currentTime, volume, userInteracted]);
 
   // Rendering composito su canvas
   const renderComposite = useCallback(() => {
@@ -208,28 +203,29 @@ export const CompositeVideoPlayer = ({
               offsetY = 0;
             }
 
-            // Solo il video track ha un offset speciale per layering
-            if (item.track > 0) {
-              const trackOffsetX = item.track * 30;
-              const trackOffsetY = item.track * 30;
-              renderWidth *= 0.8;
-              renderHeight *= 0.8;
-              offsetX += trackOffsetX;
-              offsetY += trackOffsetY;
-            }
+            // Applica offset basato su track per layering
+            const trackOffsetX = item.track * 20;
+            const trackOffsetY = item.track * 20;
 
-            ctx.drawImage(video, offsetX, offsetY, renderWidth, renderHeight);
+            ctx.drawImage(
+              video,
+              offsetX + trackOffsetX,
+              offsetY + trackOffsetY,
+              renderWidth - trackOffsetX * 2,
+              renderHeight - trackOffsetY * 2
+            );
 
-            // Overlay con nome del file
+            // Overlay con nome del file e info audio
             ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-            ctx.fillRect(offsetX, offsetY, 200, 30);
+            ctx.fillRect(offsetX + trackOffsetX, offsetY + trackOffsetY, 250, 30);
             ctx.fillStyle = '#ffffff';
             ctx.font = '14px Arial';
             ctx.textAlign = 'left';
+            const audioIcon = video.muted ? '🔇' : '🔊';
             ctx.fillText(
-              `${item.mediaFile.name} (${relativeTime.toFixed(1)}s)`,
-              offsetX + 10,
-              offsetY + 20
+              `${audioIcon} ${item.mediaFile.name} (${relativeTime.toFixed(1)}s)`,
+              offsetX + trackOffsetX + 10,
+              offsetY + trackOffsetY + 20
             );
           } else {
             // Placeholder per video non ancora caricato
@@ -271,39 +267,66 @@ export const CompositeVideoPlayer = ({
               offsetY = (canvas.height - renderHeight) / 2;
             }
 
-            ctx.drawImage(img, offsetX, offsetY, renderWidth, renderHeight);
+            // Offset per track
+            const trackOffsetX = item.track * 40;
+            const trackOffsetY = item.track * 40;
+
+            ctx.drawImage(
+              img,
+              offsetX + trackOffsetX,
+              offsetY + trackOffsetY,
+              renderWidth - trackOffsetX,
+              renderHeight - trackOffsetY
+            );
 
             // Overlay
             ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-            ctx.fillRect(offsetX, offsetY, 180, 25);
+            ctx.fillRect(offsetX + trackOffsetX, offsetY + trackOffsetY, 180, 25);
             ctx.fillStyle = '#ffffff';
             ctx.font = '12px Arial';
-            ctx.fillText(item.mediaFile.name, offsetX + 10, offsetY + 18);
+            ctx.fillText(
+              item.mediaFile.name,
+              offsetX + trackOffsetX + 10,
+              offsetY + trackOffsetY + 18
+            );
+          } else {
+            // Placeholder per immagine non caricata
+            const trackColor = `hsl(${item.track * 120 + 60}, 70%, 60%)`;
+            ctx.fillStyle = trackColor;
+            ctx.fillRect(
+              item.track * 40,
+              item.track * 40,
+              300,
+              200
+            );
+            ctx.fillStyle = '#000000';
+            ctx.font = '14px Arial';
+            ctx.fillText(
+              `Loading: ${item.mediaFile.name}`,
+              item.track * 40 + 20,
+              item.track * 40 + 30
+            );
           }
         } else if (item.mediaFile.type === 'audio') {
-          // Visualizzazione per file audio con waveform simulata
-          const barCount = 50;
-          const barWidth = 4;
-          const barSpacing = 2;
-          const baseY = canvas.height - 80 - item.track * 30;
+          // Visualizzazione per file audio - con indicatori di riproduzione
+          const audio = audioElementsRef.current.get(item.id);
+          const isAudioPlaying = audio && !audio.paused;
+          const trackColor = isAudioPlaying ? `hsl(${item.track * 120 + 180}, 90%, 60%)` : `hsl(${item.track * 120 + 180}, 70%, 50%)`;
 
-          ctx.fillStyle = `hsl(${item.track * 120 + 180}, 70%, 50%)`;
-
-          for (let i = 0; i < barCount; i++) {
-            // Simula una waveform basata sul tempo
-            const phase = (relativeTime * 10 + i * 0.5) % (Math.PI * 2);
-            const height = 15 + Math.sin(phase) * 8;
-            const x = 50 + i * (barWidth + barSpacing);
-
-            ctx.fillRect(x, baseY - height, barWidth, height);
-          }
-
+          ctx.fillStyle = trackColor;
+          ctx.fillRect(
+            20,
+            canvas.height - 60 - item.track * 25,
+            200,
+            20
+          );
           ctx.fillStyle = '#ffffff';
           ctx.font = '12px Arial';
+          const audioIcon = (audio && audio.muted) ? '🔇' : (isAudioPlaying ? '🎵' : '♪');
           ctx.fillText(
-            `♪ ${item.mediaFile.name} (${relativeTime.toFixed(1)}s)`,
-            50,
-            baseY - 20
+            `${audioIcon} ${item.mediaFile.name}`,
+            30,
+            canvas.height - 48 - item.track * 25
           );
         }
       } catch (error) {
@@ -313,30 +336,34 @@ export const CompositeVideoPlayer = ({
 
     // HUD con informazioni
     ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-    ctx.fillRect(10, 10, 300, 80);
+    ctx.fillRect(10, 10, 350, 80);
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 16px Arial';
     ctx.textAlign = 'left';
-    ctx.fillText(`Time: ${currentTime.toFixed(1)}s / ${totalDuration.toFixed(1)}s`, 20, 30);
+    ctx.fillText(`Time: ${currentTime.toFixed(1)}s`, 20, 30);
     ctx.font = '12px Arial';
     ctx.fillText(`Active Items: ${activeItems.length}`, 20, 50);
     ctx.fillText(`Total Timeline Items: ${timelineItems.length}`, 20, 65);
-    ctx.fillText(`Volume: ${volume}%`, 20, 80);
+    if (!userInteracted) {
+      ctx.fillStyle = '#ffaa00';
+      ctx.fillText(`⚠️ Click to enable audio`, 20, 80);
+    } else {
+      ctx.fillStyle = '#00ff00';
+      ctx.fillText(`🔊 Audio enabled`, 20, 80);
+    }
 
-  }, [currentTime, timelineItems, getActiveItems, totalDuration, volume]);
+  }, [currentTime, timelineItems, getActiveItems, userInteracted]);
 
   // Animation loop per il playback
   useEffect(() => {
     if (isPlaying) {
       const animate = () => {
-        const now = performance.now();
-        if (now - lastUpdateTimeRef.current >= 33) { // ~30fps
-          onTimeUpdate(prevTime => {
-            const newTime = prevTime + 0.033;
-            return Math.min(newTime, totalDuration);
-          });
-          lastUpdateTimeRef.current = now;
-        }
+        const deltaTime = 0.033; // ~30fps
+        onTimeUpdate((prevTime) => {
+          const newTime = prevTime + deltaTime;
+          lastTimeRef.current = newTime;
+          return newTime;
+        });
         animationFrameRef.current = requestAnimationFrame(animate);
       };
       animationFrameRef.current = requestAnimationFrame(animate);
@@ -352,46 +379,39 @@ export const CompositeVideoPlayer = ({
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [isPlaying, onTimeUpdate, totalDuration]);
+  }, [isPlaying, onTimeUpdate]);
 
-  // Sincronizza media elements quando cambia il tempo o lo stato di play
-  useEffect(() => {
-    syncMediaElements();
-  }, [syncMediaElements]);
-
-  // Re-render quando necessario
+  // Re-render quando cambiano tempo o elementi timeline
   useEffect(() => {
     renderComposite();
   }, [renderComposite]);
 
-  // Gestisci il volume change
-  useEffect(() => {
-    videoElementsRef.current.forEach(video => {
-      video.volume = volume / 100;
-    });
-    audioElementsRef.current.forEach(audio => {
-      audio.volume = volume / 100;
-    });
-  }, [volume]);
-
   const handlePlayPause = () => {
+    // Abilita l'interazione utente per sbloccare l'audio
+    if (!userInteracted) {
+      setUserInteracted(true);
+    }
     onPlayStateChange(!isPlaying);
   };
 
   const handleSeekBackward = () => {
-    setIsSeeking(true);
     onTimeUpdate(Math.max(0, currentTime - 5));
-    setTimeout(() => setIsSeeking(false), 100);
   };
 
   const handleSeekForward = () => {
-    setIsSeeking(true);
-    onTimeUpdate(Math.min(totalDuration, currentTime + 5));
-    setTimeout(() => setIsSeeking(false), 100);
+    onTimeUpdate(currentTime + 5);
   };
 
   const handleVolumeChange = (value: number[]) => {
-    setVolume(value[0]);
+    const newVolume = value[0];
+    setVolume(newVolume);
+    // Applica volume a tutti i video e audio attivi
+    videoElementsRef.current.forEach(video => {
+      video.volume = newVolume / 100;
+    });
+    audioElementsRef.current.forEach(audio => {
+      audio.volume = newVolume / 100;
+    });
   };
 
   const formatTime = (seconds: number) => {
@@ -402,6 +422,9 @@ export const CompositeVideoPlayer = ({
 
   return (
     <div className="h-full flex flex-col">
+      {/* Hidden container per video/audio elements */}
+      <div ref={hiddenVideoContainerRef} style={{ display: 'none' }} />
+
       {/* Video Display Area - Canvas per composizione */}
       <div className="flex-1 flex items-center justify-center bg-black relative p-4">
         <canvas
@@ -410,6 +433,11 @@ export const CompositeVideoPlayer = ({
           height={720}
           className="max-w-full max-h-full border border-muted-foreground/20 bg-black"
           style={{ aspectRatio: '16/9' }}
+          onClick={() => {
+            if (!userInteracted) {
+              setUserInteracted(true);
+            }
+          }}
         />
 
         {/* Overlay Play Button - Central */}
@@ -437,6 +465,13 @@ export const CompositeVideoPlayer = ({
             >
               <Pause className="w-8 h-8 text-white" />
             </Button>
+          </div>
+        )}
+
+        {/* Audio Warning */}
+        {!userInteracted && (
+          <div className="absolute bottom-4 left-4 bg-yellow-600/90 text-white px-3 py-2 rounded-md text-sm backdrop-blur-sm">
+            ⚠️ Click anywhere to enable audio
           </div>
         )}
       </div>
@@ -482,7 +517,7 @@ export const CompositeVideoPlayer = ({
 
           {/* Time Display */}
           <div className="text-sm text-muted-foreground font-mono">
-            {formatTime(currentTime)} / {formatTime(totalDuration)}
+            {formatTime(currentTime)}
             {timelineItems.length === 0 && (
               <span className="ml-2 text-xs opacity-60">
                 (Add media to timeline)
@@ -500,7 +535,9 @@ export const CompositeVideoPlayer = ({
               step={1}
               className="flex-1"
             />
-            <span className="text-xs text-muted-foreground w-8">{volume}%</span>
+            <span className="text-xs text-muted-foreground w-8">
+              {volume}%
+            </span>
           </div>
         </div>
       </Card>

@@ -15,7 +15,7 @@ export const FilesBrowser = ({
   files,
   onFilesAdded,
   onItemAddedToTimeline,
-  timelineItems 
+  timelineItems
 }: FilesBrowserProps) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);

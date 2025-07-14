@@ -42,7 +42,7 @@ export const Timeline = ({
 
   // Handle timeline click to change time
   const handleTimelineClick = (e: React.MouseEvent) => {
-    if (timelineContentRef.current && !isDragging && !resizing) {
+    if (timelineContentRef.current && !isDragging && !resizing && !draggedItem) {
       const rect = timelineContentRef.current.getBoundingClientRect();
       const clickX = e.clientX - rect.left + scrollLeft;
       const newTime = clickX / scale;
