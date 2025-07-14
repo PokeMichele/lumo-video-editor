@@ -339,6 +339,34 @@ export const CompositeVideoPlayer = ({
           className="max-w-full max-h-full border border-muted-foreground/20 bg-black"
           style={{ aspectRatio: '16/9' }}
         />
+
+        {/* Overlay Play Button - Central */}
+        {!isPlaying && (
+          <Button
+            onClick={handlePlayPause}
+            size="lg"
+            className="absolute inset-0 m-auto w-20 h-20 rounded-full bg-black/70 hover:bg-black/80 border-2 border-white/30 backdrop-blur-sm transition-all duration-200 hover:scale-110"
+            disabled={timelineItems.length === 0}
+          >
+            <Play className="w-8 h-8 text-white ml-1" />
+          </Button>
+        )}
+
+        {/* Pause overlay quando in riproduzione */}
+        {isPlaying && (
+          <div
+            className="absolute inset-0 cursor-pointer group"
+            onClick={handlePlayPause}
+          >
+            <Button
+              onClick={handlePlayPause}
+              size="lg"
+              className="absolute inset-0 m-auto w-20 h-20 rounded-full bg-black/50 hover:bg-black/70 border-2 border-white/20 backdrop-blur-sm transition-all duration-200 opacity-0 group-hover:opacity-100"
+            >
+              <Pause className="w-8 h-8 text-white" />
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Controls - Always visible */}
