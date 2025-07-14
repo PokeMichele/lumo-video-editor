@@ -38,6 +38,37 @@ export const Timeline = ({
   );
   const playheadPosition = currentTime * scale;
 
+  // Apply dark scrollbar styles
+  useEffect(() => {
+    if (timelineContentRef.current) {
+      const element = timelineContentRef.current;
+      const style = document.createElement('style');
+      style.textContent = `
+        .timeline-scrollbar::-webkit-scrollbar {
+          height: 12px;
+        }
+        .timeline-scrollbar::-webkit-scrollbar-track {
+          background: #1f2937;
+          border-radius: 6px;
+        }
+        .timeline-scrollbar::-webkit-scrollbar-thumb {
+          background: #374151;
+          border-radius: 6px;
+          border: 2px solid #1f2937;
+        }
+        .timeline-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: #4b5563;
+        }
+      `;
+      document.head.appendChild(style);
+      element.classList.add('timeline-scrollbar');
+
+      return () => {
+        document.head.removeChild(style);
+      };
+    }
+  }, []);
+
   // Handle scroll della timeline - solo dal contenuto
   const handleTimelineContentScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const newScrollLeft = e.currentTarget.scrollLeft;
@@ -340,6 +371,10 @@ export const Timeline = ({
           className="ml-20 relative h-full overflow-x-auto overflow-y-hidden"
           onScroll={handleTimelineContentScroll}
           ref={timelineContentRef}
+          style={{
+            scrollbarWidth: 'thin',
+            scrollbarColor: '#374151 #1f2937'
+          }}
         >
           <div
             className="relative h-48"
