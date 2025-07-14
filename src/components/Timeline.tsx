@@ -33,6 +33,8 @@ export const Timeline = ({
   const [resizing, setResizing] = useState<{ itemId: string; edge: 'left' | 'right' } | null>(null);
   const [scrollLeft, setScrollLeft] = useState(0);
   const [initialItemsForDrag, setInitialItemsForDrag] = useState<TimelineItem[] | null>(null);
+  const [snapThreshold] = useState(15); // pixels for snapping
+  const [activeSnapLines, setActiveSnapLines] = useState<number[]>([]);
 
   // Calcola la larghezza effettiva della timeline in base al contenuto
   const timelineWidth = Math.max(totalDuration * scale, 1000,
@@ -121,6 +123,37 @@ export const Timeline = ({
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // Calculate snap points for magnetic borders
+  const calculateSnapPoints = (draggedItemId: string, targetTrack: number) => {
+    const snapPoints: number[] = [0]; // Always snap to timeline start
+
+    // Get all items in the same track except the dragged one
+    const otherItemsInTrack = items.filter(item =>
+      item.track === targetTrack && item.id !== draggedItemId
+    );
+
+    // Add start and end points of all other items
+    otherItemsInTrack.forEach(item => {
+      snapPoints.push(item.startTime); // Start of item
+      snapPoints.push(item.startTime + item.duration); // End of item
+    });
+
+    return [...new Set(snapPoints)].sort((a, b) => a - b); // Remove duplicates and sort
+  };
+
+  // Find the closest snap point
+  const findSnapPoint = (currentTime: number, snapPoints: number[]): { time: number; snapped: boolean; snapLine?: number } => {
+    const snapThresholdTime = snapThreshold / scale; // Convert pixels to time
+
+    for (const snapPoint of snapPoints) {
+      if (Math.abs(currentTime - snapPoint) <= snapThresholdTime) {
+        return { time: snapPoint, snapped: true, snapLine: snapPoint };
+      }
+    }
+
+    return { time: currentTime, snapped: false }; // No snap point found
+  };
+
   // Handle context menu actions
   const handleCopy = (item: TimelineItem) => {
     setCopiedItem({ ...item, id: `${item.id}_copy` });
@@ -195,12 +228,24 @@ export const Timeline = ({
         const item = items.find(i => i.id === resizing.itemId);
         if (!item) return;
 
+        // Calculate snap points for resizing
+        const snapPoints = calculateSnapPoints(resizing.itemId, item.track);
+
         const updatedItems = items.map(i => {
           if (i.id === resizing.itemId) {
             if (resizing.edge === 'left') {
               const maxStartTime = i.startTime + i.duration - 0.1;
-              const newStartTime = Math.max(0, Math.min(newTime, maxStartTime));
+              const snapResult = findSnapPoint(newTime, snapPoints);
+              const newStartTime = Math.max(0, Math.min(snapResult.time, maxStartTime));
               const durationChange = i.startTime - newStartTime;
+
+              // Update snap lines
+              if (snapResult.snapped && snapResult.snapLine !== undefined) {
+                setActiveSnapLines([snapResult.snapLine]);
+              } else {
+                setActiveSnapLines([]);
+              }
+
               return {
                 ...i,
                 startTime: newStartTime,
@@ -208,7 +253,16 @@ export const Timeline = ({
               };
             } else {
               const minEndTime = i.startTime + 0.1;
-              const newEndTime = Math.max(minEndTime, newTime);
+              const snapResult = findSnapPoint(newTime, snapPoints);
+              const newEndTime = Math.max(minEndTime, snapResult.time);
+
+              // Update snap lines
+              if (snapResult.snapped && snapResult.snapLine !== undefined) {
+                setActiveSnapLines([snapResult.snapLine]);
+              } else {
+                setActiveSnapLines([]);
+              }
+
               return {
                 ...i,
                 duration: newEndTime - i.startTime
@@ -238,9 +292,20 @@ export const Timeline = ({
         };
 
         if (isValidTrack(newTrack, draggedItemData.mediaFile.type)) {
+          // Calculate snap points for the target track
+          const snapPoints = calculateSnapPoints(draggedItem, newTrack);
+          const snapResult = findSnapPoint(newTime, snapPoints);
+
+          // Update active snap lines for visual feedback
+          if (snapResult.snapped && snapResult.snapLine !== undefined) {
+            setActiveSnapLines([snapResult.snapLine]);
+          } else {
+            setActiveSnapLines([]);
+          }
+
           const updatedItems = items.map(item =>
             item.id === draggedItem
-              ? { ...item, startTime: newTime, track: newTrack }
+              ? { ...item, startTime: snapResult.time, track: newTrack }
               : item
           );
           onItemsChange(updatedItems);
@@ -262,6 +327,7 @@ export const Timeline = ({
       setDraggedItem(null);
       setResizing(null);
       setInitialItemsForDrag(null);
+      setActiveSnapLines([]); // Clear snap lines when dragging ends
     };
 
     if (isDragging || resizing) {
@@ -430,6 +496,15 @@ export const Timeline = ({
                 />
               ))}
             </div>
+
+            {/* Snap Lines - visible during dragging or resizing */}
+            {(isDragging || resizing) && activeSnapLines.map((snapTime, index) => (
+              <div
+                key={`snap-${index}`}
+                className="absolute top-0 bottom-0 w-0.5 bg-yellow-400/60 pointer-events-none z-20"
+                style={{ left: `${snapTime * scale}px` }}
+              />
+            ))}
           </div>
         </div>
       </div>
