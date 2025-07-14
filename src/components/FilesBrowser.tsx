@@ -1,5 +1,5 @@
 import { useState, useRef, DragEvent } from "react";
-import { Upload, File, Music, Video, Image as ImageIcon } from "lucide-react";
+import { Upload, File, Music, Video, Image as ImageIcon, Undo2, Redo2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { MediaFile, TimelineItem } from "./VideoEditor";
@@ -8,14 +8,22 @@ interface FilesBrowserProps {
   files: MediaFile[];
   onFilesAdded: (files: MediaFile[]) => void;
   onItemAddedToTimeline: (item: TimelineItem) => void;
-  timelineItems: TimelineItem[]; // Aggiunto per calcolare le posizioni
+  timelineItems: TimelineItem[];
+  onUndo: () => void;
+  onRedo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
 }
 
 export const FilesBrowser = ({
   files,
   onFilesAdded,
   onItemAddedToTimeline,
-  timelineItems
+  timelineItems,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo
 }: FilesBrowserProps) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -155,7 +163,42 @@ export const FilesBrowser = ({
 
   return (
     <div className="h-full flex flex-col">
+      {/* Header with Logo and Undo/Redo */}
       <div className="p-4 border-b border-border">
+        <div className="flex items-center justify-between mb-4">
+          {/* Logo placeholder */}
+          <div className="flex items-center space-x-2">
+            <div className="w-8 h-8 bg-gradient-primary rounded-md flex items-center justify-center">
+              <span className="text-white font-bold text-sm">VE</span>
+            </div>
+            <span className="text-sm font-medium text-muted-foreground">Video Editor</span>
+          </div>
+
+          {/* Undo/Redo buttons */}
+          <div className="flex items-center space-x-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onUndo}
+              disabled={!canUndo}
+              className="w-8 h-8 p-0 hover:bg-accent/50"
+              title="Undo (Ctrl+Z)"
+            >
+              <Undo2 className="w-4 h-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onRedo}
+              disabled={!canRedo}
+              className="w-8 h-8 p-0 hover:bg-accent/50"
+              title="Redo (Ctrl+Y)"
+            >
+              <Redo2 className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+
         <h2 className="text-lg font-semibold text-foreground mb-4">Project Files</h2>
 
         {/* Drop Zone */}
