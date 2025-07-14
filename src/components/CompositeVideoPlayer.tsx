@@ -99,10 +99,12 @@ export const CompositeVideoPlayer = ({
       const item = activeItems.find(item => item.id === itemId);
       if (item) {
         const relativeTime = currentTime - item.startTime;
+        const mediaOffset = item.mediaStartOffset || 0;
+        const actualVideoTime = relativeTime + mediaOffset;
 
         // Sincronizza il tempo se necessario
-        if (Math.abs(video.currentTime - relativeTime) > 0.1) {
-          video.currentTime = relativeTime;
+        if (Math.abs(video.currentTime - actualVideoTime) > 0.1) {
+          video.currentTime = actualVideoTime;
         }
 
         if (isPlaying && userInteracted) {
@@ -127,10 +129,12 @@ export const CompositeVideoPlayer = ({
       const item = activeItems.find(item => item.id === itemId);
       if (item) {
         const relativeTime = currentTime - item.startTime;
+        const mediaOffset = item.mediaStartOffset || 0;
+        const actualAudioTime = relativeTime + mediaOffset;
 
         // Sincronizza il tempo se necessario
-        if (Math.abs(audio.currentTime - relativeTime) > 0.1) {
-          audio.currentTime = relativeTime;
+        if (Math.abs(audio.currentTime - actualAudioTime) > 0.1) {
+          audio.currentTime = actualAudioTime;
         }
 
         if (isPlaying && userInteracted) {
@@ -222,8 +226,10 @@ export const CompositeVideoPlayer = ({
             ctx.font = '14px Arial';
             ctx.textAlign = 'left';
             const audioIcon = video.muted ? '🔇' : '🔊';
+            const mediaOffset = item.mediaStartOffset || 0;
+            const displayTime = relativeTime + mediaOffset;
             ctx.fillText(
-              `${audioIcon} ${item.mediaFile.name} (${relativeTime.toFixed(1)}s)`,
+              `${audioIcon} ${item.mediaFile.name} (${displayTime.toFixed(1)}s)`,
               offsetX + trackOffsetX + 10,
               offsetY + trackOffsetY + 20
             );
@@ -323,8 +329,10 @@ export const CompositeVideoPlayer = ({
           ctx.fillStyle = '#ffffff';
           ctx.font = '12px Arial';
           const audioIcon = (audio && audio.muted) ? '🔇' : (isAudioPlaying ? '🎵' : '♪');
+          const mediaOffset = item.mediaStartOffset || 0;
+          const displayTime = relativeTime + mediaOffset;
           ctx.fillText(
-            `${audioIcon} ${item.mediaFile.name}`,
+            `${audioIcon} ${item.mediaFile.name} (${displayTime.toFixed(1)}s)`,
             30,
             canvas.height - 48 - item.track * 25
           );

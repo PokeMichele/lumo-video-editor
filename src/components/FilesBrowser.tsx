@@ -155,7 +155,8 @@ export const FilesBrowser = ({
       mediaFile: file,
       startTime,
       duration: file.duration,
-      track
+      track,
+      mediaStartOffset: 0 // Nuovo elemento inizia dall'inizio del file
     };
 
     onItemAddedToTimeline(newItem);

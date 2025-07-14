@@ -166,7 +166,8 @@ export const Timeline = ({
         ...copiedItem,
         id: `${copiedItem.id}_${Date.now()}`,
         track,
-        startTime: currentTime
+        startTime: currentTime,
+        mediaStartOffset: copiedItem.mediaStartOffset || 0 // Mantiene l'offset del media copiato
       };
       onItemsChangeWithHistory([...items, newItem]);
     }
@@ -175,14 +176,21 @@ export const Timeline = ({
   const handleSplit = (item: TimelineItem) => {
     const splitTime = currentTime - item.startTime;
     if (splitTime > 0 && splitTime < item.duration) {
-      const firstPart = { ...item };
+      const originalMediaOffset = item.mediaStartOffset || 0;
+
+      const firstPart = {
+        ...item,
+        duration: splitTime,
+        mediaStartOffset: originalMediaOffset // Mantiene l'offset originale
+      };
+
       const secondPart = {
         ...item,
         id: `${item.id}_split_${Date.now()}`,
         startTime: item.startTime + splitTime,
-        duration: item.duration - splitTime
+        duration: item.duration - splitTime,
+        mediaStartOffset: originalMediaOffset + splitTime // Offset aumentato del tempo di split
       };
-      firstPart.duration = splitTime;
 
       const newItems = items.filter(i => i.id !== item.id);
       onItemsChangeWithHistory([...newItems, firstPart, secondPart]);

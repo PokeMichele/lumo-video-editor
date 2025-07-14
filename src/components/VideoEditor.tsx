@@ -21,6 +21,7 @@ export interface TimelineItem {
   startTime: number;
   duration: number;
   track: number; // 0, 1, or 2
+  mediaStartOffset?: number; // Offset in seconds from start of original media file
 }
 
 interface HistoryState {
