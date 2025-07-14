@@ -20,7 +20,7 @@ export const Timeline = ({
   onItemsChange,
   totalDuration
 }: TimelineProps) => {
-  const timelineRef = useRef<HTMLDivElement>(null);
+  const timelineHeaderContentRef = useRef<HTMLDivElement>(null);
   const timelineContentRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [draggedItem, setDraggedItem] = useState<string | null>(null);
@@ -38,18 +38,14 @@ export const Timeline = ({
   );
   const playheadPosition = currentTime * scale;
 
-  // Handle scroll della timeline - gestisce sincronizzazione tra header e content
-  const handleTimelineScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    const scrollLeft = e.currentTarget.scrollLeft;
-    setScrollLeft(scrollLeft);
+  // Handle scroll della timeline - solo dal contenuto
+  const handleTimelineContentScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const newScrollLeft = e.currentTarget.scrollLeft;
+    setScrollLeft(newScrollLeft);
 
-    // Non sincronizzare se lo scroll è stato originato dall'header per evitare loop
-    if (e.currentTarget === timelineRef.current) {
-      // Scroll dell'header, sincronizza il content
-      const contentScrollElement = timelineRef.current?.parentElement?.querySelector('.ml-20') as HTMLElement;
-      if (contentScrollElement && contentScrollElement.scrollLeft !== scrollLeft) {
-        contentScrollElement.scrollLeft = scrollLeft;
-      }
+    // Sincronizza l'header spostando il contenuto interno
+    if (timelineHeaderContentRef.current) {
+      timelineHeaderContentRef.current.style.transform = `translateX(-${newScrollLeft}px)`;
     }
   };
 
@@ -286,16 +282,12 @@ export const Timeline = ({
 
   return (
     <div className="h-full flex flex-col bg-timeline-bg">
-      {/* Timeline Header with Time Markers */}
+      {/* Timeline Header with Time Markers - NO SCROLLBAR */}
       <div className="relative h-16 bg-gradient-timeline border-b border-border">
         <div className="absolute left-0 top-0 w-20 h-full bg-secondary/50 border-r border-border z-30"></div>
-        <div
-          ref={timelineRef}
-          className="relative h-full cursor-pointer overflow-x-auto overflow-y-hidden ml-20"
-          onScroll={handleTimelineScroll}
-        >
+        <div className="relative h-full cursor-pointer overflow-hidden ml-20">
           <div
-            ref={timelineContentRef}
+            ref={timelineHeaderContentRef}
             className="relative h-full"
             style={{ width: `${timelineWidth}px` }}
             onClick={handleTimelineClick}
@@ -343,8 +335,12 @@ export const Timeline = ({
           ))}
         </div>
 
-        {/* Timeline Content */}
-        <div className="ml-20 relative h-full overflow-x-auto overflow-y-hidden" onScroll={handleTimelineScroll}>
+        {/* Timeline Content - UNICA SCROLLBAR */}
+        <div
+          className="ml-20 relative h-full overflow-x-auto overflow-y-hidden"
+          onScroll={handleTimelineContentScroll}
+          ref={timelineContentRef}
+        >
           <div
             className="relative h-48"
             style={{ width: `${timelineWidth}px` }}
