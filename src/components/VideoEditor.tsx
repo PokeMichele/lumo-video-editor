@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { FilesBrowser } from "./FilesBrowser";
 import { CompositeVideoPlayer } from "./CompositeVideoPlayer";
 import { Timeline } from "./Timeline";
@@ -23,12 +23,37 @@ export interface TimelineItem {
   track: number; // 0, 1, or 2
 }
 
+interface HistoryState {
+  timelineItems: TimelineItem[];
+  currentTime: number;
+}
+
 export const VideoEditor = () => {
   const [mediaFiles, setMediaFiles] = useState<MediaFile[]>([]);
   const [timelineItems, setTimelineItems] = useState<TimelineItem[]>([]);
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [history, setHistory] = useState<HistoryState[]>([{ timelineItems: [], currentTime: 0 }]);
+  const [historyIndex, setHistoryIndex] = useState(0);
   const { toast } = useToast();
+
+  // Keyboard shortcuts for undo/redo
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === 'z' && !e.shiftKey) {
+          e.preventDefault();
+          handleUndo();
+        } else if (e.key === 'y' || (e.key === 'z' && e.shiftKey)) {
+          e.preventDefault();
+          handleRedo();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [historyIndex, history]);
 
   // Calcola dinamicamente la durata totale basata sugli elementi nella timeline
   const totalDuration = useMemo(() => {
@@ -50,12 +75,58 @@ export const VideoEditor = () => {
     setMediaFiles(prev => [...prev, ...files]);
   };
 
+  // Save state to history
+  const saveToHistory = (newTimelineItems: TimelineItem[], newCurrentTime: number = currentTime) => {
+    const newState: HistoryState = {
+      timelineItems: newTimelineItems,
+      currentTime: newCurrentTime
+    };
+
+    // Remove any future history if we're not at the end
+    const newHistory = history.slice(0, historyIndex + 1);
+    newHistory.push(newState);
+
+    // Limit history to 50 steps
+    if (newHistory.length > 50) {
+      newHistory.shift();
+    } else {
+      setHistoryIndex(prev => prev + 1);
+    }
+
+    setHistory(newHistory);
+  };
+
+  // Undo function
+  const handleUndo = () => {
+    if (historyIndex > 0) {
+      const newIndex = historyIndex - 1;
+      const previousState = history[newIndex];
+      setTimelineItems(previousState.timelineItems);
+      setCurrentTime(previousState.currentTime);
+      setHistoryIndex(newIndex);
+    }
+  };
+
+  // Redo function
+  const handleRedo = () => {
+    if (historyIndex < history.length - 1) {
+      const newIndex = historyIndex + 1;
+      const nextState = history[newIndex];
+      setTimelineItems(nextState.timelineItems);
+      setCurrentTime(nextState.currentTime);
+      setHistoryIndex(newIndex);
+    }
+  };
+
   const handleItemAddedToTimeline = (item: TimelineItem) => {
-    setTimelineItems(prev => [...prev, item]);
+    const newItems = [...timelineItems, item];
+    setTimelineItems(newItems);
+    saveToHistory(newItems);
   };
 
   const handleTimelineItemsChange = (items: TimelineItem[]) => {
     setTimelineItems(items);
+    saveToHistory(items);
   };
 
   const handleExport = () => {
@@ -85,6 +156,10 @@ export const VideoEditor = () => {
             onFilesAdded={handleFilesAdded}
             onItemAddedToTimeline={handleItemAddedToTimeline}
             timelineItems={timelineItems}
+            onUndo={handleUndo}
+            onRedo={handleRedo}
+            canUndo={historyIndex > 0}
+            canRedo={historyIndex < history.length - 1}
           />
         </div>
 
@@ -130,6 +205,7 @@ export const VideoEditor = () => {
                 <p>Timeline Items: {timelineItems.length}</p>
                 <p>Total Duration: {Math.round(totalDuration)}s</p>
                 <p>Current Time: {Math.round(currentTime)}s</p>
+                <p>History: {historyIndex + 1}/{history.length}</p>
               </div>
             </div>
           </div>
