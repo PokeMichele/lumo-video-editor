@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Card } from "@/components/ui/card";
 import { TimelineItem } from "./VideoEditor";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -14,6 +14,18 @@ interface TimelineProps {
   totalDuration: number;
 }
 
+// Throttle function per limitare la frequenza delle chiamate
+const throttle = (func: Function, limit: number) => {
+  let inThrottle: boolean;
+  return function(this: any, ...args: any[]) {
+    if (!inThrottle) {
+      func.apply(this, args);
+      inThrottle = true;
+      setTimeout(() => inThrottle = false, limit);
+    }
+  }
+};
+
 export const Timeline = ({
   items,
   currentTime,
@@ -24,9 +36,6 @@ export const Timeline = ({
 }: TimelineProps) => {
   const timelineHeaderContentRef = useRef<HTMLDivElement>(null);
   const timelineContentRef = useRef<HTMLDivElement>(null);
-  const dragPreviewRef = useRef<HTMLDivElement>(null);
-  const animationFrameRef = useRef<number>();
-
   const [isDragging, setIsDragging] = useState(false);
   const [draggedItem, setDraggedItem] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
@@ -39,27 +48,37 @@ export const Timeline = ({
   const [snapThreshold] = useState(15); // pixels for snapping
   const [activeSnapLines, setActiveSnapLines] = useState<number[]>([]);
 
-  // Stato per il drag preview ottimizzato
+  // Stati per il drag ottimizzato
   const [dragPreview, setDragPreview] = useState<{
     itemId: string;
     x: number;
     y: number;
-    width: number;
     track: number;
     startTime: number;
-    duration: number;
-    snapped: boolean;
-    snapLine?: number;
   } | null>(null);
 
-  // Memoized calculations
-  const timelineWidth = useMemo(() => Math.max(
-    totalDuration * scale,
-    1000,
-    ...items.map(item => (item.startTime + item.duration) * scale + 100)
-  ), [totalDuration, scale, items]);
+  const dragStateRef = useRef<{
+    isDragging: boolean;
+    startX: number;
+    startY: number;
+    startTime: number;
+    startTrack: number;
+    snapPoints: number[];
+  }>({
+    isDragging: false,
+    startX: 0,
+    startY: 0,
+    startTime: 0,
+    startTrack: 0,
+    snapPoints: []
+  });
 
-  const playheadPosition = useMemo(() => currentTime * scale, [currentTime, scale]);
+  // Calcola la larghezza effettiva della timeline in base al contenuto
+  const timelineWidth = Math.max(totalDuration * scale, 1000,
+    // Assicurati che sia abbastanza larga per tutti gli elementi
+    ...items.map(item => (item.startTime + item.duration) * scale + 100)
+  );
+  const playheadPosition = currentTime * scale;
 
   // Apply dark scrollbar styles
   useEffect(() => {
@@ -93,7 +112,7 @@ export const Timeline = ({
   }, []);
 
   // Handle scroll della timeline - solo dal contenuto
-  const handleTimelineContentScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+  const handleTimelineContentScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const newScrollLeft = e.currentTarget.scrollLeft;
     setScrollLeft(newScrollLeft);
 
@@ -101,19 +120,19 @@ export const Timeline = ({
     if (timelineHeaderContentRef.current) {
       timelineHeaderContentRef.current.style.transform = `translateX(-${newScrollLeft}px)`;
     }
-  }, []);
+  };
 
   // Handle timeline click to change time
-  const handleTimelineClick = useCallback((e: React.MouseEvent) => {
+  const handleTimelineClick = (e: React.MouseEvent) => {
     if (!isDragging && !resizing && !draggedItem) {
       const mouseX = e.clientX - 80 + scrollLeft; // 80px = larghezza labels
       const newTime = mouseX / scale;
       onTimeChange(Math.max(0, Math.min(newTime, totalDuration)));
     }
-  }, [isDragging, resizing, draggedItem, scrollLeft, scale, totalDuration, onTimeChange]);
+  };
 
-  // Generate time markers - ottimizzato con useMemo
-  const timeMarkers = useMemo(() => {
+  // Generate time markers - ora fissi rispetto al contenuto scrollabile
+  const generateTimeMarkers = () => {
     const markers = [];
     const interval = totalDuration > 60 ? 10 : 5; // 10s intervals for long videos, 5s for short
 
@@ -133,15 +152,15 @@ export const Timeline = ({
       );
     }
     return markers;
-  }, [totalDuration, scale]);
+  };
 
-  const formatTime = useCallback((seconds: number) => {
+  const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
-  }, []);
+  };
 
-  // Calculate snap points for magnetic borders - ottimizzato
+  // Calculate snap points for magnetic borders - OTTIMIZZATO
   const calculateSnapPoints = useCallback((draggedItemId: string, targetTrack: number) => {
     const snapPoints: number[] = [0]; // Always snap to timeline start
 
@@ -159,7 +178,7 @@ export const Timeline = ({
     return [...new Set(snapPoints)].sort((a, b) => a - b); // Remove duplicates and sort
   }, [items]);
 
-  // Find the closest snap point - ottimizzato
+  // Find the closest snap point - OTTIMIZZATO
   const findSnapPoint = useCallback((currentTime: number, snapPoints: number[]): { time: number; snapped: boolean; snapLine?: number } => {
     const snapThresholdTime = snapThreshold / scale; // Convert pixels to time
 
@@ -170,15 +189,23 @@ export const Timeline = ({
     }
 
     return { time: currentTime, snapped: false }; // No snap point found
-  }, [snapThreshold, scale]);
+  }, [scale, snapThreshold]);
 
-  // Handle context menu actions
-  const handleCopy = useCallback((item: TimelineItem) => {
-    setCopiedItem({ ...item, id: `${item.id}_copy` });
-    setContextMenu(null);
+  // Validate track compatibility - OTTIMIZZATO
+  const isValidTrack = useCallback((track: number, mediaType: string) => {
+    if (track < 0 || track > 2) return false;
+    if (mediaType === 'video' || mediaType === 'image') return track === 0;
+    if (mediaType === 'audio') return track === 1 || track === 2;
+    return false;
   }, []);
 
-  const handlePaste = useCallback((track: number) => {
+  // Handle context menu actions
+  const handleCopy = (item: TimelineItem) => {
+    setCopiedItem({ ...item, id: `${item.id}_copy` });
+    setContextMenu(null);
+  };
+
+  const handlePaste = (track: number) => {
     if (copiedItem) {
       const newItem = {
         ...copiedItem,
@@ -189,9 +216,9 @@ export const Timeline = ({
       };
       onItemsChangeWithHistory([...items, newItem]);
     }
-  }, [copiedItem, currentTime, items, onItemsChangeWithHistory]);
+  };
 
-  const handleSplit = useCallback((item: TimelineItem) => {
+  const handleSplit = (item: TimelineItem) => {
     const splitTime = currentTime - item.startTime;
     if (splitTime > 0 && splitTime < item.duration) {
       const originalMediaOffset = item.mediaStartOffset || 0;
@@ -214,54 +241,15 @@ export const Timeline = ({
       onItemsChangeWithHistory([...newItems, firstPart, secondPart]);
     }
     setContextMenu(null);
-  }, [currentTime, items, onItemsChangeWithHistory]);
+  };
 
-  const handleDelete = useCallback((itemId: string) => {
+  const handleDelete = (itemId: string) => {
     onItemsChangeWithHistory(items.filter(item => item.id !== itemId));
     setContextMenu(null);
-  }, [items, onItemsChangeWithHistory]);
+  };
 
-  // Ottimizzazione: funzione per aggiornare il preview visuale senza toccare lo state
-  const updateDragPreview = useCallback((mouseX: number, mouseY: number, draggedItemData: TimelineItem) => {
-    const newTime = Math.max(0, mouseX / scale);
-    const newTrack = Math.floor(mouseY / 60);
-
-    // Validate track compatibility
-    const isValidTrack = (track: number, mediaType: string) => {
-      if (track < 0 || track > 2) return false;
-      if (mediaType === 'video' || mediaType === 'image') return track === 0;
-      if (mediaType === 'audio') return track === 1 || track === 2;
-      return false;
-    };
-
-    if (isValidTrack(newTrack, draggedItemData.mediaFile.type)) {
-      // Calculate snap points for the target track
-      const snapPoints = calculateSnapPoints(draggedItemData.id, newTrack);
-      const snapResult = findSnapPoint(newTime, snapPoints);
-
-      setDragPreview({
-        itemId: draggedItemData.id,
-        x: snapResult.time * scale,
-        y: newTrack * 60 + 8,
-        width: draggedItemData.duration * scale,
-        track: newTrack,
-        startTime: snapResult.time,
-        duration: draggedItemData.duration,
-        snapped: snapResult.snapped,
-        snapLine: snapResult.snapLine
-      });
-
-      // Update snap lines
-      if (snapResult.snapped && snapResult.snapLine !== undefined) {
-        setActiveSnapLines([snapResult.snapLine]);
-      } else {
-        setActiveSnapLines([]);
-      }
-    }
-  }, [scale, calculateSnapPoints, findSnapPoint]);
-
-  // Handle drag start
-  const handleMouseDown = useCallback((e: React.MouseEvent, item: TimelineItem, isResize?: 'left' | 'right') => {
+  // Handle drag start - OTTIMIZZATO
+  const handleMouseDown = (e: React.MouseEvent, item: TimelineItem, isResize?: 'left' | 'right') => {
     e.preventDefault();
     e.stopPropagation();
 
@@ -273,10 +261,24 @@ export const Timeline = ({
       return;
     }
 
-    const rect = e.currentTarget.getBoundingClientRect();
+    const rect = timelineContentRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    const mouseX = e.clientX - rect.left + scrollLeft;
+
+    // Salva lo stato iniziale del drag
+    dragStateRef.current = {
+      isDragging: true,
+      startX: mouseX,
+      startY: e.clientY - rect.top,
+      startTime: item.startTime,
+      startTrack: item.track,
+      snapPoints: calculateSnapPoints(item.id, item.track)
+    };
+
     setDragOffset({
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top
+      x: e.clientX - e.currentTarget.getBoundingClientRect().left,
+      y: e.clientY - e.currentTarget.getBoundingClientRect().top
     });
     setIsDragging(true);
     setDraggedItem(item.id);
@@ -284,105 +286,134 @@ export const Timeline = ({
     // Inizializza il drag preview
     setDragPreview({
       itemId: item.id,
-      x: item.startTime * scale,
-      y: item.track * 60 + 8,
-      width: item.duration * scale,
+      x: mouseX,
+      y: e.clientY - rect.top,
       track: item.track,
-      startTime: item.startTime,
-      duration: item.duration,
-      snapped: false
+      startTime: item.startTime
     });
-  }, [items, scale]);
+  };
 
-  // Handle mouse move ottimizzato con requestAnimationFrame
+  // Throttled update function per limitare gli aggiornamenti
+  const throttledUpdateItems = useCallback(
+    throttle((updatedItems: TimelineItem[]) => {
+      onItemsChange(updatedItems);
+    }, 16), // ~60fps
+    [onItemsChange]
+  );
+
+  // Handle mouse move for dragging and resizing - SUPER OTTIMIZZATO
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
+      if (!timelineContentRef.current) return;
 
-      animationFrameRef.current = requestAnimationFrame(() => {
-        if (resizing && timelineContentRef.current) {
-          const rect = timelineContentRef.current.getBoundingClientRect();
-          const mouseX = e.clientX - rect.left + scrollLeft;
-          const newTime = mouseX / scale;
+      if (resizing) {
+        // Resize logic - mantenuta ma ottimizzata
+        const rect = timelineContentRef.current.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left + scrollLeft;
+        const newTime = mouseX / scale;
 
-          const item = items.find(i => i.id === resizing.itemId);
-          if (!item) return;
+        const item = items.find(i => i.id === resizing.itemId);
+        if (!item) return;
 
-          // Calculate snap points for resizing
-          const snapPoints = calculateSnapPoints(resizing.itemId, item.track);
+        // Calculate snap points for resizing
+        const snapPoints = calculateSnapPoints(resizing.itemId, item.track);
 
-          const updatedItems = items.map(i => {
-            if (i.id === resizing.itemId) {
-              if (resizing.edge === 'left') {
-                const maxStartTime = i.startTime + i.duration - 0.1;
-                const snapResult = findSnapPoint(newTime, snapPoints);
-                const newStartTime = Math.max(0, Math.min(snapResult.time, maxStartTime));
-                const durationChange = i.startTime - newStartTime;
+        const updatedItems = items.map(i => {
+          if (i.id === resizing.itemId) {
+            if (resizing.edge === 'left') {
+              const maxStartTime = i.startTime + i.duration - 0.1;
+              const snapResult = findSnapPoint(newTime, snapPoints);
+              const newStartTime = Math.max(0, Math.min(snapResult.time, maxStartTime));
+              const durationChange = i.startTime - newStartTime;
 
-                // Update snap lines
-                if (snapResult.snapped && snapResult.snapLine !== undefined) {
-                  setActiveSnapLines([snapResult.snapLine]);
-                } else {
-                  setActiveSnapLines([]);
-                }
-
-                return {
-                  ...i,
-                  startTime: newStartTime,
-                  duration: i.duration + durationChange
-                };
+              // Update snap lines
+              if (snapResult.snapped && snapResult.snapLine !== undefined) {
+                setActiveSnapLines([snapResult.snapLine]);
               } else {
-                const minEndTime = i.startTime + 0.1;
-                const snapResult = findSnapPoint(newTime, snapPoints);
-                const newEndTime = Math.max(minEndTime, snapResult.time);
-
-                // Update snap lines
-                if (snapResult.snapped && snapResult.snapLine !== undefined) {
-                  setActiveSnapLines([snapResult.snapLine]);
-                } else {
-                  setActiveSnapLines([]);
-                }
-
-                return {
-                  ...i,
-                  duration: newEndTime - i.startTime
-                };
+                setActiveSnapLines([]);
               }
+
+              return {
+                ...i,
+                startTime: newStartTime,
+                duration: i.duration + durationChange
+              };
+            } else {
+              const minEndTime = i.startTime + 0.1;
+              const snapResult = findSnapPoint(newTime, snapPoints);
+              const newEndTime = Math.max(minEndTime, snapResult.time);
+
+              // Update snap lines
+              if (snapResult.snapped && snapResult.snapLine !== undefined) {
+                setActiveSnapLines([snapResult.snapLine]);
+              } else {
+                setActiveSnapLines([]);
+              }
+
+              return {
+                ...i,
+                duration: newEndTime - i.startTime
+              };
             }
-            return i;
-          });
-          onItemsChange(updatedItems);
-        } else if (isDragging && draggedItem && timelineContentRef.current) {
-          const rect = timelineContentRef.current.getBoundingClientRect();
-          const mouseX = e.clientX - rect.left + scrollLeft;
-          const mouseY = e.clientY - rect.top - 16; // Account for header
+          }
+          return i;
+        });
+        throttledUpdateItems(updatedItems);
+      } else if (isDragging && draggedItem && dragStateRef.current.isDragging) {
+        // Drag logic - SUPER OTTIMIZZATO
+        const rect = timelineContentRef.current.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left + scrollLeft;
+        const mouseY = e.clientY - rect.top - 16; // Account for header
 
-          const draggedItemData = items.find(i => i.id === draggedItem);
-          if (!draggedItemData) return;
+        const newTime = Math.max(0, mouseX / scale);
+        const newTrack = Math.floor(mouseY / 60);
 
-          // Aggiorna solo il preview visuale, non lo state
-          updateDragPreview(mouseX, mouseY, draggedItemData);
+        const draggedItemData = items.find(i => i.id === draggedItem);
+        if (!draggedItemData) return;
+
+        // Aggiorna il drag preview IMMEDIATAMENTE per visual feedback
+        setDragPreview({
+          itemId: draggedItem,
+          x: mouseX,
+          y: mouseY,
+          track: newTrack,
+          startTime: newTime
+        });
+
+        // Verifica validità track
+        if (isValidTrack(newTrack, draggedItemData.mediaFile.type)) {
+          // Calculate snap points solo per il track corrente
+          let snapPoints = dragStateRef.current.snapPoints;
+          if (newTrack !== dragStateRef.current.startTrack) {
+            snapPoints = calculateSnapPoints(draggedItem, newTrack);
+            dragStateRef.current.snapPoints = snapPoints;
+            dragStateRef.current.startTrack = newTrack;
+          }
+
+          const snapResult = findSnapPoint(newTime, snapPoints);
+
+          // Update active snap lines for visual feedback
+          if (snapResult.snapped && snapResult.snapLine !== undefined) {
+            setActiveSnapLines([snapResult.snapLine]);
+          } else {
+            setActiveSnapLines([]);
+          }
+
+          // Aggiorna i dati con throttling
+          const updatedItems = items.map(item =>
+            item.id === draggedItem
+              ? { ...item, startTime: snapResult.time, track: newTrack }
+              : item
+          );
+          throttledUpdateItems(updatedItems);
         }
-      });
+      }
     };
 
     const handleMouseUp = () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
-
-      // Apply final changes only on mouse up
-      if (isDragging && dragPreview && draggedItem) {
-        const updatedItems = items.map(item =>
-          item.id === draggedItem
-            ? { ...item, startTime: dragPreview.startTime, track: dragPreview.track }
-            : item
-        );
-        onItemsChangeWithHistory(updatedItems);
-      } else if (resizing && initialItemsForDrag) {
-        // Check if anything actually changed for resize
+      // Save to history only when drag/resize ends
+      if ((isDragging || resizing) && initialItemsForDrag) {
+        // Check if anything actually changed
         const hasChanges = JSON.stringify(items) !== JSON.stringify(initialItemsForDrag);
         if (hasChanges) {
           onItemsChangeWithHistory(items);
@@ -391,10 +422,11 @@ export const Timeline = ({
 
       setIsDragging(false);
       setDraggedItem(null);
+      setDragPreview(null);
       setResizing(null);
       setInitialItemsForDrag(null);
-      setActiveSnapLines([]);
-      setDragPreview(null);
+      setActiveSnapLines([]); // Clear snap lines when dragging ends
+      dragStateRef.current.isDragging = false;
     };
 
     if (isDragging || resizing) {
@@ -403,18 +435,19 @@ export const Timeline = ({
     }
 
     return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDragging, draggedItem, resizing, dragPreview, items, scale, scrollLeft, onItemsChange, onItemsChangeWithHistory, calculateSnapPoints, findSnapPoint, updateDragPreview]);
+  }, [isDragging, draggedItem, resizing, items, scale, scrollLeft,
+      calculateSnapPoints, findSnapPoint, isValidTrack, onItemsChangeWithHistory, throttledUpdateItems]);
 
-  // Render timeline item ottimizzato
-  const renderTimelineItem = useCallback((item: TimelineItem, track: number) => {
-    const left = item.startTime * scale;
+  // Render timeline item - OTTIMIZZATO CON DRAG PREVIEW
+  const renderTimelineItem = (item: TimelineItem, track: number) => {
+    // Se questo item è in drag, usa il drag preview per la posizione
+    const isDraggedItem = draggedItem === item.id;
+    const left = isDraggedItem && dragPreview ? dragPreview.startTime * scale : item.startTime * scale;
     const width = item.duration * scale;
+    const topPosition = isDraggedItem && dragPreview ? dragPreview.track * 60 + 8 : track * 60 + 8;
 
     const trackColors = {
       video: 'bg-video-track',
@@ -422,19 +455,18 @@ export const Timeline = ({
       image: 'bg-video-track' // Images use video track color
     };
 
-    // Se questo item è quello che stiamo trascinando e abbiamo un preview, nascondi l'originale
-    const isBeingDragged = draggedItem === item.id && dragPreview;
-    const opacity = isBeingDragged ? 'opacity-20' : 'opacity-100';
-
     return (
       <div
         key={item.id}
-        className={`absolute h-12 rounded border-2 border-white/20 cursor-move transition-opacity group
-          ${trackColors[item.mediaFile.type]} ${opacity} z-10`}
+        className={`absolute h-12 rounded border-2 border-white/20 cursor-move transition-none group
+          ${trackColors[item.mediaFile.type]} ${
+          isDraggedItem ? 'opacity-70 z-30 shadow-lg' : 'z-10'
+        }`}
         style={{
           left: `${left}px`,
           width: `${width}px`,
-          top: `${track * 60 + 8}px`
+          top: `${topPosition}px`,
+          transform: isDraggedItem ? 'scale(1.02)' : 'none'
         }}
         onMouseDown={(e) => handleMouseDown(e, item)}
         onContextMenu={(e) => {
@@ -458,12 +490,12 @@ export const Timeline = ({
         </div>
       </div>
     );
-  }, [scale, draggedItem, dragPreview, handleMouseDown, formatTime]);
+  };
 
-  // Group items by track - ottimizzato con useMemo
-  const trackItems = useMemo(() => [0, 1, 2].map(trackIndex =>
+  // Group items by track
+  const trackItems = [0, 1, 2].map(trackIndex =>
     items.filter(item => item.track === trackIndex)
-  ), [items]);
+  );
 
   return (
     <div className="h-full flex flex-col bg-timeline-bg">
@@ -487,8 +519,8 @@ export const Timeline = ({
             style={{ width: `${timelineWidth}px` }}
             onClick={handleTimelineClick}
           >
-            {/* Time Markers */}
-            {timeMarkers}
+            {/* Time Markers - ora posizionati in pixel fissi */}
+            {generateTimeMarkers()}
 
             {/* Playhead */}
             <div
@@ -513,12 +545,6 @@ export const Timeline = ({
               onContextMenu={(e) => {
                 e.preventDefault();
                 if (copiedItem) {
-                  const isValidTrack = (track: number, mediaType: string) => {
-                    if (mediaType === 'video' || mediaType === 'image') return track === 0;
-                    if (mediaType === 'audio') return track === 1 || track === 2;
-                    return false;
-                  };
-
                   if (isValidTrack(index, copiedItem.mediaFile.type)) {
                     handlePaste(index);
                   }
@@ -558,29 +584,6 @@ export const Timeline = ({
               trackItems.map(item => renderTimelineItem(item, trackIndex))
             )}
 
-            {/* Drag Preview - elemento che segue il mouse fluidamente */}
-            {dragPreview && (
-              <div
-                className={`absolute h-12 rounded border-2 border-yellow-400 cursor-move transition-all z-30
-                  ${dragPreview.snapped ? 'shadow-lg shadow-yellow-400/50' : ''}
-                  bg-blue-500/80`}
-                style={{
-                  left: `${dragPreview.x}px`,
-                  width: `${dragPreview.width}px`,
-                  top: `${dragPreview.y}px`,
-                  transform: 'translateZ(0)', // Force hardware acceleration
-                  willChange: 'transform'
-                }}
-              >
-                <div className="p-2 h-full flex items-center justify-between text-white text-xs overflow-hidden select-none">
-                  <span className="truncate flex-1 select-none">
-                    {items.find(i => i.id === dragPreview.itemId)?.mediaFile.name}
-                  </span>
-                  <span className="ml-2 font-mono select-none">{formatTime(dragPreview.duration)}</span>
-                </div>
-              </div>
-            )}
-
             {/* Grid Lines */}
             <div className="absolute inset-0 pointer-events-none">
               {Array.from({ length: Math.ceil(totalDuration / 10) }).map((_, i) => (
@@ -596,7 +599,7 @@ export const Timeline = ({
             {(isDragging || resizing) && activeSnapLines.map((snapTime, index) => (
               <div
                 key={`snap-${index}`}
-                className="absolute top-0 bottom-0 w-0.5 bg-yellow-400/80 pointer-events-none z-20 shadow-sm"
+                className="absolute top-0 bottom-0 w-0.5 bg-yellow-400/60 pointer-events-none z-20"
                 style={{ left: `${snapTime * scale}px` }}
               />
             ))}
