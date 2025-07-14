@@ -61,7 +61,21 @@ export default {
 					'accent-foreground': 'hsl(var(--sidebar-accent-foreground))',
 					border: 'hsl(var(--sidebar-border))',
 					ring: 'hsl(var(--sidebar-ring))'
-				}
+				},
+				// Video Editor Specific Colors
+				'video-track': 'hsl(var(--video-track))',
+				'audio-track': 'hsl(var(--audio-track))',
+				'timeline-bg': 'hsl(var(--timeline-bg))',
+				'timeline-ruler': 'hsl(var(--timeline-ruler))',
+				'playhead': 'hsl(var(--playhead))'
+			},
+			backgroundImage: {
+				'gradient-primary': 'var(--gradient-primary)',
+				'gradient-timeline': 'var(--gradient-timeline)'
+			},
+			boxShadow: {
+				'elegant': 'var(--shadow-elegant)',
+				'timeline': 'var(--shadow-timeline)'
 			},
 			borderRadius: {
 				lg: 'var(--radius)',
