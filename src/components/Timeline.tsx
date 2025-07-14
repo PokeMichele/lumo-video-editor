@@ -380,9 +380,9 @@ export const Timeline = ({
           onMouseDown={(e) => handleMouseDown(e, item, 'right')}
         />
 
-        <div className="p-2 h-full flex items-center justify-between text-white text-xs overflow-hidden">
-          <span className="truncate flex-1">{item.mediaFile.name}</span>
-          <span className="ml-2 font-mono">{formatTime(item.duration)}</span>
+        <div className="p-2 h-full flex items-center justify-between text-white text-xs overflow-hidden select-none">
+          <span className="truncate flex-1 select-none">{item.mediaFile.name}</span>
+          <span className="ml-2 font-mono select-none">{formatTime(item.duration)}</span>
         </div>
       </div>
     );
