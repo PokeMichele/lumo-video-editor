@@ -370,7 +370,7 @@ export const Timeline = ({
           if (i.id === resizing.itemId) {
             if (resizing.edge === 'left') {
               const maxStartTime = i.startTime + i.duration - 0.1;
-              const snapResult = findSnapPoint(newTime, i.duration, snapPoints);
+              const snapResult = findSnapPoint(newTime, snapPoints, i.duration);
               const newStartTime = Math.max(0, Math.min(snapResult.time, maxStartTime));
               const durationChange = i.startTime - newStartTime;
 
@@ -388,8 +388,8 @@ export const Timeline = ({
               };
             } else {
               const minEndTime = i.startTime + 0.1;
-              const snapResult = findSnapPoint(i.startTime, newTime - i.startTime, snapPoints);
-              const newEndTime = Math.max(minEndTime, snapResult.time + (newTime - i.startTime));
+              const snapResult = findSnapPoint(newTime, snapPoints, i.duration);
+              const newEndTime = Math.max(minEndTime, snapResult.time);
 
               // Update snap lines - mostra se showSnapLine è true
               if (snapResult.showSnapLine && snapResult.snapLine !== undefined) {
@@ -408,13 +408,12 @@ export const Timeline = ({
         });
         throttledUpdateItems(updatedItems);
       } else if (isDragging && draggedItem && dragStateRef.current.isDragging) {
-        // Drag logic - OTTIMIZZATO CON SNAP CORRETTO DEI BORDI
+        // Drag logic - OTTIMIZZATO CON SNAPPING CORRETTO
         const rect = timelineContentRef.current.getBoundingClientRect();
         const mouseX = e.clientX - rect.left + scrollLeft;
         const mouseY = e.clientY - rect.top - 16; // Account for header
 
-        // CALCOLA LA POSIZIONE CORRETTA DELL'ELEMENTO usando il dragOffset
-        const elementStartTime = Math.max(0, (mouseX - dragOffset.x) / scale);
+        const rawTime = Math.max(0, mouseX / scale);
         const newTrack = Math.floor(mouseY / 60);
 
         const draggedItemData = items.find(i => i.id === draggedItem);
@@ -430,8 +429,8 @@ export const Timeline = ({
             dragStateRef.current.startTrack = newTrack;
           }
 
-          // Calcola lo snap in base ai BORDI dell'elemento
-          const snapResult = findSnapPoint(elementStartTime, draggedItemData.duration, snapPoints);
+          // Calcola lo snap PRIMA di aggiornare il preview
+          const snapResult = findSnapPoint(rawTime, snapPoints, draggedItemData.duration);
           const finalTime = snapResult.time;
 
           // Aggiorna le snap lines quando sono vicini (showSnapLine)
@@ -444,7 +443,7 @@ export const Timeline = ({
           // Aggiorna il drag preview con la posizione snappata
           setDragPreview({
             itemId: draggedItem,
-            x: finalTime * scale, // Usa la posizione snappata dell'inizio elemento
+            x: finalTime * scale, // Usa la posizione snappata, non quella raw
             y: mouseY,
             track: newTrack,
             startTime: finalTime // Usa il tempo snappato
@@ -461,10 +460,10 @@ export const Timeline = ({
           // Track non valido - mantieni posizione ma senza snapping
           setDragPreview({
             itemId: draggedItem,
-            x: elementStartTime * scale, // Usa posizione corretta anche senza snapping
+            x: mouseX,
             y: mouseY,
             track: newTrack,
-            startTime: elementStartTime
+            startTime: rawTime
           });
           setActiveSnapLines([]);
         }
