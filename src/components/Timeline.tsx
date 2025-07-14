@@ -64,7 +64,7 @@ export const Timeline = ({
     startY: number;
     startTime: number;
     startTrack: number;
-    snapPoints: number[];
+    snapPoints: { time: number; type: 'start' | 'end' | 'timeline-start' }[];
   }>({
     isDragging: false,
     startX: 0,
