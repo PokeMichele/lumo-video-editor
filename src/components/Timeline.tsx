@@ -360,29 +360,20 @@ export const Timeline = ({
         });
         throttledUpdateItems(updatedItems);
       } else if (isDragging && draggedItem && dragStateRef.current.isDragging) {
-        // Drag logic - SUPER OTTIMIZZATO
+        // Drag logic - OTTIMIZZATO CON SNAPPING CORRETTO
         const rect = timelineContentRef.current.getBoundingClientRect();
         const mouseX = e.clientX - rect.left + scrollLeft;
         const mouseY = e.clientY - rect.top - 16; // Account for header
 
-        const newTime = Math.max(0, mouseX / scale);
+        const rawTime = Math.max(0, mouseX / scale);
         const newTrack = Math.floor(mouseY / 60);
 
         const draggedItemData = items.find(i => i.id === draggedItem);
         if (!draggedItemData) return;
 
-        // Aggiorna il drag preview IMMEDIATAMENTE per visual feedback
-        setDragPreview({
-          itemId: draggedItem,
-          x: mouseX,
-          y: mouseY,
-          track: newTrack,
-          startTime: newTime
-        });
-
         // Verifica validità track
         if (isValidTrack(newTrack, draggedItemData.mediaFile.type)) {
-          // Calculate snap points solo per il track corrente
+          // Calculate snap points per il track corrente
           let snapPoints = dragStateRef.current.snapPoints;
           if (newTrack !== dragStateRef.current.startTrack) {
             snapPoints = calculateSnapPoints(draggedItem, newTrack);
@@ -390,22 +381,43 @@ export const Timeline = ({
             dragStateRef.current.startTrack = newTrack;
           }
 
-          const snapResult = findSnapPoint(newTime, snapPoints);
+          // Calcola lo snap PRIMA di aggiornare il preview
+          const snapResult = findSnapPoint(rawTime, snapPoints);
+          const finalTime = snapResult.time;
 
-          // Update active snap lines for visual feedback
+          // Aggiorna le snap lines IMMEDIATAMENTE
           if (snapResult.snapped && snapResult.snapLine !== undefined) {
             setActiveSnapLines([snapResult.snapLine]);
           } else {
             setActiveSnapLines([]);
           }
 
-          // Aggiorna i dati con throttling
+          // Aggiorna il drag preview con la posizione snappata
+          setDragPreview({
+            itemId: draggedItem,
+            x: finalTime * scale, // Usa la posizione snappata, non quella raw
+            y: mouseY,
+            track: newTrack,
+            startTime: finalTime // Usa il tempo snappato
+          });
+
+          // Aggiorna i dati con throttling usando il tempo snappato
           const updatedItems = items.map(item =>
             item.id === draggedItem
-              ? { ...item, startTime: snapResult.time, track: newTrack }
+              ? { ...item, startTime: finalTime, track: newTrack }
               : item
           );
           throttledUpdateItems(updatedItems);
+        } else {
+          // Track non valido - mantieni posizione ma senza snapping
+          setDragPreview({
+            itemId: draggedItem,
+            x: mouseX,
+            y: mouseY,
+            track: newTrack,
+            startTime: rawTime
+          });
+          setActiveSnapLines([]);
         }
       }
     };
