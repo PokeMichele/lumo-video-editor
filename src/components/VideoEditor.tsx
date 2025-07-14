@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { FilesBrowser } from "./FilesBrowser";
 import { CompositeVideoPlayer } from "./CompositeVideoPlayer";
 import { Timeline } from "./Timeline";
@@ -29,6 +29,22 @@ export const VideoEditor = () => {
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const { toast } = useToast();
+
+  // Calcola dinamicamente la durata totale basata sugli elementi nella timeline
+  const totalDuration = useMemo(() => {
+    if (timelineItems.length === 0) {
+      return 60; // Durata minima di default (1 minuto)
+    }
+
+    const maxEndTime = timelineItems.reduce((max, item) => {
+      const endTime = item.startTime + item.duration;
+      return Math.max(max, endTime);
+    }, 0);
+
+    // Aggiungi un buffer del 20% o minimo 10 secondi per permettere ulteriori aggiunte
+    const buffer = Math.max(maxEndTime * 0.2, 10);
+    return Math.ceil(maxEndTime + buffer);
+  }, [timelineItems]);
 
   const handleFilesAdded = (files: MediaFile[]) => {
     setMediaFiles(prev => [...prev, ...files]);
@@ -64,6 +80,7 @@ export const VideoEditor = () => {
             files={mediaFiles}
             onFilesAdded={handleFilesAdded}
             onItemAddedToTimeline={handleItemAddedToTimeline}
+            timelineItems={timelineItems}
           />
         </div>
 
@@ -103,6 +120,13 @@ export const VideoEditor = () => {
                 <Button variant="outline" size="sm">Regola Colori</Button>
                 <Button variant="outline" size="sm">Audio Mix</Button>
               </div>
+
+              {/* Debug info */}
+              <div className="mt-4 text-xs text-muted-foreground/70">
+                <p>Timeline Items: {timelineItems.length}</p>
+                <p>Total Duration: {Math.round(totalDuration)}s</p>
+                <p>Current Time: {Math.round(currentTime)}s</p>
+              </div>
             </div>
           </div>
         </div>
@@ -115,7 +139,7 @@ export const VideoEditor = () => {
           currentTime={currentTime}
           onTimeChange={setCurrentTime}
           onItemsChange={setTimelineItems}
-          totalDuration={300} // 5 minutes default
+          totalDuration={totalDuration}
         />
       </div>
     </div>

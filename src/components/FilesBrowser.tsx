@@ -8,9 +8,15 @@ interface FilesBrowserProps {
   files: MediaFile[];
   onFilesAdded: (files: MediaFile[]) => void;
   onItemAddedToTimeline: (item: TimelineItem) => void;
+  timelineItems: TimelineItem[]; // Aggiunto per calcolare le posizioni
 }
 
-export const FilesBrowser = ({ files, onFilesAdded, onItemAddedToTimeline }: FilesBrowserProps) => {
+export const FilesBrowser = ({
+  files,
+  onFilesAdded,
+  onItemAddedToTimeline,
+  timelineItems 
+}: FilesBrowserProps) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -27,7 +33,7 @@ export const FilesBrowser = ({ files, onFilesAdded, onItemAddedToTimeline }: Fil
   const handleDrop = (e: DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
-    
+
     const droppedFiles = Array.from(e.dataTransfer.files);
     processFiles(droppedFiles);
   };
@@ -41,13 +47,13 @@ export const FilesBrowser = ({ files, onFilesAdded, onItemAddedToTimeline }: Fil
 
   const processFiles = async (fileList: File[]) => {
     const mediaFiles: MediaFile[] = [];
-    
+
     for (const file of fileList) {
       if (file.type.startsWith('video/') || file.type.startsWith('audio/') || file.type.startsWith('image/')) {
         const url = URL.createObjectURL(file);
         let duration = 0;
         let type: 'video' | 'audio' | 'image' = 'video';
-        
+
         if (file.type.startsWith('video/')) {
           type = 'video';
           duration = await getMediaDuration(url, file.type);
@@ -58,7 +64,7 @@ export const FilesBrowser = ({ files, onFilesAdded, onItemAddedToTimeline }: Fil
           type = 'image';
           duration = 3; // Default 3 seconds for images
         }
-        
+
         const mediaFile: MediaFile = {
           id: `${Date.now()}-${Math.random()}`,
           name: file.name,
@@ -67,20 +73,20 @@ export const FilesBrowser = ({ files, onFilesAdded, onItemAddedToTimeline }: Fil
           duration,
           file
         };
-        
+
         mediaFiles.push(mediaFile);
       }
     }
-    
+
     onFilesAdded(mediaFiles);
   };
 
   const getMediaDuration = (url: string, type: string): Promise<number> => {
     return new Promise((resolve) => {
-      const element = type.startsWith('video/') 
+      const element = type.startsWith('video/')
         ? document.createElement('video')
         : document.createElement('audio');
-      
+
       element.src = url;
       element.onloadedmetadata = () => {
         resolve(element.duration || 0);
@@ -89,15 +95,61 @@ export const FilesBrowser = ({ files, onFilesAdded, onItemAddedToTimeline }: Fil
     });
   };
 
+  // Calcola la posizione ottimale per un nuovo elemento nella timeline
+  const calculateOptimalStartTime = (mediaFile: MediaFile): number => {
+    // Determina la traccia appropriata basata sul tipo di media
+    let targetTrack = 0;
+    if (mediaFile.type === 'video' || mediaFile.type === 'image') {
+      targetTrack = 0; // Video track
+    } else if (mediaFile.type === 'audio') {
+      // Trova la prima traccia audio disponibile (1 o 2)
+      const track1Items = timelineItems.filter(item => item.track === 1);
+      const track2Items = timelineItems.filter(item => item.track === 2);
+
+      // Usa la traccia con meno elementi, o la 1 se sono uguali
+      targetTrack = track1Items.length <= track2Items.length ? 1 : 2;
+    }
+
+    // Trova tutti gli elementi nella traccia target
+    const itemsInTrack = timelineItems.filter(item => item.track === targetTrack);
+
+    if (itemsInTrack.length === 0) {
+      return 0; // Se la traccia è vuota, inizia da 0
+    }
+
+    // Trova l'ultimo elemento nella traccia
+    const lastItem = itemsInTrack.reduce((latest, current) => {
+      const currentEndTime = current.startTime + current.duration;
+      const latestEndTime = latest.startTime + latest.duration;
+      return currentEndTime > latestEndTime ? current : latest;
+    });
+
+    // Restituisce il tempo di fine dell'ultimo elemento
+    return lastItem.startTime + lastItem.duration;
+  };
+
   const handleAddToTimeline = (file: MediaFile) => {
+    const startTime = calculateOptimalStartTime(file);
+
+    // Determina la traccia appropriata
+    let track = 0;
+    if (file.type === 'video' || file.type === 'image') {
+      track = 0; // Video track
+    } else if (file.type === 'audio') {
+      // Trova la prima traccia audio disponibile (1 o 2)
+      const track1Items = timelineItems.filter(item => item.track === 1);
+      const track2Items = timelineItems.filter(item => item.track === 2);
+      track = track1Items.length <= track2Items.length ? 1 : 2;
+    }
+
     const newItem: TimelineItem = {
       id: `timeline-${Date.now()}-${Math.random()}`,
       mediaFile: file,
-      startTime: 0,
+      startTime,
       duration: file.duration,
-      track: 0 // Default to first track
+      track
     };
-    
+
     onItemAddedToTimeline(newItem);
   };
 
@@ -105,12 +157,12 @@ export const FilesBrowser = ({ files, onFilesAdded, onItemAddedToTimeline }: Fil
     <div className="h-full flex flex-col">
       <div className="p-4 border-b border-border">
         <h2 className="text-lg font-semibold text-foreground mb-4">Project Files</h2>
-        
+
         {/* Drop Zone */}
-        <Card 
+        <Card
           className={`p-6 border-2 border-dashed transition-colors cursor-pointer ${
-            isDragOver 
-              ? 'border-primary bg-primary/10' 
+            isDragOver
+              ? 'border-primary bg-primary/10'
               : 'border-muted-foreground/25 hover:border-primary/50'
           }`}
           onDragOver={handleDragOver}
@@ -125,7 +177,7 @@ export const FilesBrowser = ({ files, onFilesAdded, onItemAddedToTimeline }: Fil
             </p>
           </div>
         </Card>
-        
+
         <input
           ref={fileInputRef}
           type="file"
