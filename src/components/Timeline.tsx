@@ -45,7 +45,8 @@ export const Timeline = ({
   const [resizing, setResizing] = useState<{ itemId: string; edge: 'left' | 'right' } | null>(null);
   const [scrollLeft, setScrollLeft] = useState(0);
   const [initialItemsForDrag, setInitialItemsForDrag] = useState<TimelineItem[] | null>(null);
-  const [snapThreshold] = useState(15); // pixels for snapping
+  const [snapThreshold] = useState(40); // pixels for snapping - più generoso
+  const [visualSnapThreshold] = useState(60); // pixels for showing snap lines - ancora più generoso
   const [activeSnapLines, setActiveSnapLines] = useState<number[]>([]);
 
   // Stati per il drag ottimizzato
@@ -178,18 +179,44 @@ export const Timeline = ({
     return [...new Set(snapPoints)].sort((a, b) => a - b); // Remove duplicates and sort
   }, [items]);
 
-  // Find the closest snap point - OTTIMIZZATO
-  const findSnapPoint = useCallback((currentTime: number, snapPoints: number[]): { time: number; snapped: boolean; snapLine?: number } => {
-    const snapThresholdTime = snapThreshold / scale; // Convert pixels to time
+  // Find the closest snap point - OTTIMIZZATO CON DOPPIA SOGLIA
+  const findSnapPoint = useCallback((currentTime: number, snapPoints: number[]): { time: number; snapped: boolean; snapLine?: number; showSnapLine?: boolean } => {
+    const snapThresholdTime = snapThreshold / scale; // Convert pixels to time per snapping effettivo
+    const visualSnapThresholdTime = visualSnapThreshold / scale; // Convert pixels to time per visualizzazione
 
+    let closestSnapPoint: number | null = null;
+    let minDistance = Infinity;
+
+    // Trova il punto di snap più vicino
     for (const snapPoint of snapPoints) {
-      if (Math.abs(currentTime - snapPoint) <= snapThresholdTime) {
-        return { time: snapPoint, snapped: true, snapLine: snapPoint };
+      const distance = Math.abs(currentTime - snapPoint);
+      if (distance < minDistance) {
+        minDistance = distance;
+        closestSnapPoint = snapPoint;
       }
     }
 
-    return { time: currentTime, snapped: false }; // No snap point found
-  }, [scale, snapThreshold]);
+    if (closestSnapPoint !== null) {
+      const distance = Math.abs(currentTime - closestSnapPoint);
+
+      // Mostra la linea se siamo entro la soglia visuale
+      const showSnapLine = distance <= visualSnapThresholdTime;
+
+      // Snappa effettivamente se siamo entro la soglia di snapping
+      const shouldSnap = distance <= snapThresholdTime;
+
+      if (showSnapLine) {
+        return {
+          time: shouldSnap ? closestSnapPoint : currentTime,
+          snapped: shouldSnap,
+          snapLine: closestSnapPoint,
+          showSnapLine: true
+        };
+      }
+    }
+
+    return { time: currentTime, snapped: false, showSnapLine: false }; // No snap point found
+  }, [scale, snapThreshold, visualSnapThreshold]);
 
   // Validate track compatibility - OTTIMIZZATO
   const isValidTrack = useCallback((track: number, mediaType: string) => {
@@ -326,8 +353,8 @@ export const Timeline = ({
               const newStartTime = Math.max(0, Math.min(snapResult.time, maxStartTime));
               const durationChange = i.startTime - newStartTime;
 
-              // Update snap lines
-              if (snapResult.snapped && snapResult.snapLine !== undefined) {
+              // Update snap lines - mostra se showSnapLine è true
+              if (snapResult.showSnapLine && snapResult.snapLine !== undefined) {
                 setActiveSnapLines([snapResult.snapLine]);
               } else {
                 setActiveSnapLines([]);
@@ -343,8 +370,8 @@ export const Timeline = ({
               const snapResult = findSnapPoint(newTime, snapPoints);
               const newEndTime = Math.max(minEndTime, snapResult.time);
 
-              // Update snap lines
-              if (snapResult.snapped && snapResult.snapLine !== undefined) {
+              // Update snap lines - mostra se showSnapLine è true
+              if (snapResult.showSnapLine && snapResult.snapLine !== undefined) {
                 setActiveSnapLines([snapResult.snapLine]);
               } else {
                 setActiveSnapLines([]);
@@ -385,8 +412,8 @@ export const Timeline = ({
           const snapResult = findSnapPoint(rawTime, snapPoints);
           const finalTime = snapResult.time;
 
-          // Aggiorna le snap lines IMMEDIATAMENTE
-          if (snapResult.snapped && snapResult.snapLine !== undefined) {
+          // Aggiorna le snap lines quando sono vicini (showSnapLine)
+          if (snapResult.showSnapLine && snapResult.snapLine !== undefined) {
             setActiveSnapLines([snapResult.snapLine]);
           } else {
             setActiveSnapLines([]);
