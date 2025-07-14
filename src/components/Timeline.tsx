@@ -344,8 +344,8 @@ export const Timeline = ({
           {['Video', 'Audio 1', 'Audio 2'].map((label, index) => (
             <div
               key={label}
-              className="h-16 flex items-center justify-center text-xs font-medium text-muted-foreground border-b border-border relative"
-              style={{ top: `${index * 60}px` }}
+              className="absolute w-full h-14 flex items-center justify-center text-xs font-medium text-muted-foreground border-b border-border/30"
+              style={{ top: `${index * 60 + 8}px` }}
               onContextMenu={(e) => {
                 e.preventDefault();
                 if (copiedItem) {
