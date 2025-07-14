@@ -13,7 +13,7 @@ interface TimelineProps {
   totalDuration: number;
 }
 
-export const Timeline = ({
+export const Timeline = ({ 
   items,
   currentTime,
   onTimeChange,
@@ -55,10 +55,9 @@ export const Timeline = ({
 
   // Handle timeline click to change time
   const handleTimelineClick = (e: React.MouseEvent) => {
-    if (timelineContentRef.current && !isDragging && !resizing && !draggedItem) {
-      const rect = timelineContentRef.current.getBoundingClientRect();
-      const clickX = e.clientX - rect.left + scrollLeft;
-      const newTime = clickX / scale;
+    if (!isDragging && !resizing && !draggedItem) {
+      const mouseX = e.clientX - 80 + scrollLeft; // 80px = larghezza labels
+      const newTime = mouseX / scale;
       onTimeChange(Math.max(0, Math.min(newTime, totalDuration)));
     }
   };
