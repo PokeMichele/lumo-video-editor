@@ -10,6 +10,7 @@ interface TimelineProps {
   currentTime: number;
   onTimeChange: (time: number) => void;
   onItemsChange: (items: TimelineItem[]) => void;
+  onItemsChangeWithHistory: (items: TimelineItem[]) => void;
   totalDuration: number;
 }
 
@@ -18,6 +19,7 @@ export const Timeline = ({
   currentTime,
   onTimeChange,
   onItemsChange,
+  onItemsChangeWithHistory,
   totalDuration
 }: TimelineProps) => {
   const timelineHeaderContentRef = useRef<HTMLDivElement>(null);
@@ -30,6 +32,7 @@ export const Timeline = ({
   const [copiedItem, setCopiedItem] = useState<TimelineItem | null>(null);
   const [resizing, setResizing] = useState<{ itemId: string; edge: 'left' | 'right' } | null>(null);
   const [scrollLeft, setScrollLeft] = useState(0);
+  const [initialItemsForDrag, setInitialItemsForDrag] = useState<TimelineItem[] | null>(null);
 
   // Calcola la larghezza effettiva della timeline in base al contenuto
   const timelineWidth = Math.max(totalDuration * scale, 1000,
@@ -132,7 +135,7 @@ export const Timeline = ({
         track,
         startTime: currentTime
       };
-      onItemsChange([...items, newItem]);
+      onItemsChangeWithHistory([...items, newItem]);
     }
   };
 
@@ -149,13 +152,13 @@ export const Timeline = ({
       firstPart.duration = splitTime;
 
       const newItems = items.filter(i => i.id !== item.id);
-      onItemsChange([...newItems, firstPart, secondPart]);
+      onItemsChangeWithHistory([...newItems, firstPart, secondPart]);
     }
     setContextMenu(null);
   };
 
   const handleDelete = (itemId: string) => {
-    onItemsChange(items.filter(item => item.id !== itemId));
+    onItemsChangeWithHistory(items.filter(item => item.id !== itemId));
     setContextMenu(null);
   };
 
@@ -163,6 +166,9 @@ export const Timeline = ({
   const handleMouseDown = (e: React.MouseEvent, item: TimelineItem, isResize?: 'left' | 'right') => {
     e.preventDefault();
     e.stopPropagation();
+
+    // Save initial state for history
+    setInitialItemsForDrag([...items]);
 
     if (isResize) {
       setResizing({ itemId: item.id, edge: isResize });
@@ -243,9 +249,19 @@ export const Timeline = ({
     };
 
     const handleMouseUp = () => {
+      // Save to history only when drag/resize ends
+      if ((isDragging || resizing) && initialItemsForDrag) {
+        // Check if anything actually changed
+        const hasChanges = JSON.stringify(items) !== JSON.stringify(initialItemsForDrag);
+        if (hasChanges) {
+          onItemsChangeWithHistory(items);
+        }
+      }
+
       setIsDragging(false);
       setDraggedItem(null);
       setResizing(null);
+      setInitialItemsForDrag(null);
     };
 
     if (isDragging || resizing) {

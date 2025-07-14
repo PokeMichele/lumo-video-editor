@@ -126,6 +126,10 @@ export const VideoEditor = () => {
 
   const handleTimelineItemsChange = (items: TimelineItem[]) => {
     setTimelineItems(items);
+  };
+
+  const handleTimelineItemsChangeWithHistory = (items: TimelineItem[]) => {
+    setTimelineItems(items);
     saveToHistory(items);
   };
 
@@ -219,6 +223,7 @@ export const VideoEditor = () => {
           currentTime={currentTime}
           onTimeChange={setCurrentTime}
           onItemsChange={handleTimelineItemsChange}
+          onItemsChangeWithHistory={handleTimelineItemsChangeWithHistory}
           totalDuration={totalDuration}
         />
       </div>
