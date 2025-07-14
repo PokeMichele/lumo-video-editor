@@ -13,7 +13,7 @@ interface TimelineProps {
   totalDuration: number;
 }
 
-export const Timeline = ({ 
+export const Timeline = ({
   items,
   currentTime,
   onTimeChange,
