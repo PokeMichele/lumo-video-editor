@@ -315,7 +315,17 @@ export const Timeline = ({
     <div className="h-full flex flex-col bg-timeline-bg">
       {/* Timeline Header with Time Markers - NO SCROLLBAR */}
       <div className="relative h-16 bg-gradient-timeline border-b border-border">
-        <div className="absolute left-0 top-0 w-20 h-full bg-secondary/50 border-r border-border z-30"></div>
+        <div className="absolute left-0 top-0 w-20 h-full bg-secondary/50 border-r border-border z-30 flex items-center justify-center">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onTimeChange(0)}
+            className="w-10 h-10 p-0 hover:bg-accent/50 rounded-md transition-colors"
+            title="Go to start (0:00)"
+          >
+            <div className="w-0 h-0 border-t-[6px] border-b-[6px] border-r-[10px] border-t-transparent border-b-transparent border-r-muted-foreground"></div>
+          </Button>
+        </div>
         <div className="relative h-full cursor-pointer overflow-hidden ml-20">
           <div
             ref={timelineHeaderContentRef}
