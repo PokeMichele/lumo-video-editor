@@ -14,7 +14,7 @@ interface TimelineProps {
 }
 
 export const Timeline = ({
-  items, 
+  items,
   currentTime,
   onTimeChange,
   onItemsChange,
