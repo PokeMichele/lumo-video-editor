@@ -32,12 +32,25 @@ export const Timeline = ({
   const [scrollLeft, setScrollLeft] = useState(0);
 
   // Calcola la larghezza effettiva della timeline in base al contenuto
-  const timelineWidth = Math.max(totalDuration * scale, 1000);
+  const timelineWidth = Math.max(totalDuration * scale, 1000,
+    // Assicurati che sia abbastanza larga per tutti gli elementi
+    ...items.map(item => (item.startTime + item.duration) * scale + 100)
+  );
   const playheadPosition = currentTime * scale;
 
-  // Handle scroll della timeline
+  // Handle scroll della timeline - gestisce sincronizzazione tra header e content
   const handleTimelineScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    setScrollLeft(e.currentTarget.scrollLeft);
+    const scrollLeft = e.currentTarget.scrollLeft;
+    setScrollLeft(scrollLeft);
+
+    // Non sincronizzare se lo scroll è stato originato dall'header per evitare loop
+    if (e.currentTarget === timelineRef.current) {
+      // Scroll dell'header, sincronizza il content
+      const contentScrollElement = timelineRef.current?.parentElement?.querySelector('.ml-20') as HTMLElement;
+      if (contentScrollElement && contentScrollElement.scrollLeft !== scrollLeft) {
+        contentScrollElement.scrollLeft = scrollLeft;
+      }
+    }
   };
 
   // Handle timeline click to change time
