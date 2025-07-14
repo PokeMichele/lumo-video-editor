@@ -1,5 +1,5 @@
 import { useState, useRef, DragEvent } from "react";
-import { Upload, File, Music, Video } from "lucide-react";
+import { Upload, File, Music, Video, Image as ImageIcon } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { MediaFile, TimelineItem } from "./VideoEditor";
@@ -43,14 +43,26 @@ export const FilesBrowser = ({ files, onFilesAdded, onItemAddedToTimeline }: Fil
     const mediaFiles: MediaFile[] = [];
     
     for (const file of fileList) {
-      if (file.type.startsWith('video/') || file.type.startsWith('audio/')) {
+      if (file.type.startsWith('video/') || file.type.startsWith('audio/') || file.type.startsWith('image/')) {
         const url = URL.createObjectURL(file);
-        const duration = await getMediaDuration(url, file.type);
+        let duration = 0;
+        let type: 'video' | 'audio' | 'image' = 'video';
+        
+        if (file.type.startsWith('video/')) {
+          type = 'video';
+          duration = await getMediaDuration(url, file.type);
+        } else if (file.type.startsWith('audio/')) {
+          type = 'audio';
+          duration = await getMediaDuration(url, file.type);
+        } else if (file.type.startsWith('image/')) {
+          type = 'image';
+          duration = 3; // Default 3 seconds for images
+        }
         
         const mediaFile: MediaFile = {
           id: `${Date.now()}-${Math.random()}`,
           name: file.name,
-          type: file.type.startsWith('video/') ? 'video' : 'audio',
+          type,
           url,
           duration,
           file
@@ -109,7 +121,7 @@ export const FilesBrowser = ({ files, onFilesAdded, onItemAddedToTimeline }: Fil
           <div className="flex flex-col items-center text-center">
             <Upload className={`w-8 h-8 mb-2 ${isDragOver ? 'text-primary' : 'text-muted-foreground'}`} />
             <p className="text-sm text-muted-foreground">
-              Drop video/audio files here or click to browse
+              Drop video/audio/image files here or click to browse
             </p>
           </div>
         </Card>
@@ -118,7 +130,7 @@ export const FilesBrowser = ({ files, onFilesAdded, onItemAddedToTimeline }: Fil
           ref={fileInputRef}
           type="file"
           multiple
-          accept="video/*,audio/*"
+          accept="video/*,audio/*,image/*"
           onChange={handleFileInput}
           className="hidden"
         />
@@ -138,8 +150,10 @@ export const FilesBrowser = ({ files, onFilesAdded, onItemAddedToTimeline }: Fil
                   <div className="flex items-center space-x-3 flex-1 min-w-0">
                     {file.type === 'video' ? (
                       <Video className="w-4 h-4 text-video-track flex-shrink-0" />
-                    ) : (
+                    ) : file.type === 'audio' ? (
                       <Music className="w-4 h-4 text-audio-track flex-shrink-0" />
+                    ) : (
+                      <ImageIcon className="w-4 h-4 text-image-icon flex-shrink-0" />
                     )}
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-foreground truncate">

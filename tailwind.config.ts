@@ -65,6 +65,8 @@ export default {
 				// Video Editor Specific Colors
 				'video-track': 'hsl(var(--video-track))',
 				'audio-track': 'hsl(var(--audio-track))',
+				'audio-icon': 'hsl(var(--audio-icon))',
+				'image-icon': 'hsl(var(--image-icon))',
 				'timeline-bg': 'hsl(var(--timeline-bg))',
 				'timeline-ruler': 'hsl(var(--timeline-ruler))',
 				'playhead': 'hsl(var(--playhead))'

@@ -9,7 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 export interface MediaFile {
   id: string;
   name: string;
-  type: 'video' | 'audio';
+  type: 'video' | 'audio' | 'image';
   url: string;
   duration: number;
   file: File;

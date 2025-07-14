@@ -1,6 +1,9 @@
 import { useState, useRef, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { TimelineItem } from "./VideoEditor";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Button } from "@/components/ui/button";
+import { Copy, Scissors, Trash2 } from "lucide-react";
 
 interface TimelineProps {
   items: TimelineItem[];
@@ -20,14 +23,18 @@ export const Timeline = ({
   const timelineRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [draggedItem, setDraggedItem] = useState<string | null>(null);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [scale, setScale] = useState(50); // pixels per second
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; itemId: string } | null>(null);
+  const [copiedItem, setCopiedItem] = useState<TimelineItem | null>(null);
+  const [resizing, setResizing] = useState<{ itemId: string; edge: 'left' | 'right' } | null>(null);
 
   const timelineWidth = totalDuration * scale;
   const playheadPosition = (currentTime / totalDuration) * 100;
 
   // Handle timeline click to change time
   const handleTimelineClick = (e: React.MouseEvent) => {
-    if (timelineRef.current && !isDragging) {
+    if (timelineRef.current && !isDragging && !resizing) {
       const rect = timelineRef.current.getBoundingClientRect();
       const clickX = e.clientX - rect.left;
       const newTime = (clickX / rect.width) * totalDuration;
@@ -64,6 +71,147 @@ export const Timeline = ({
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // Handle context menu actions
+  const handleCopy = (item: TimelineItem) => {
+    setCopiedItem({ ...item, id: `${item.id}_copy` });
+    setContextMenu(null);
+  };
+
+  const handlePaste = (track: number) => {
+    if (copiedItem) {
+      const newItem = {
+        ...copiedItem,
+        id: `${copiedItem.id}_${Date.now()}`,
+        track,
+        startTime: currentTime
+      };
+      onItemsChange([...items, newItem]);
+    }
+  };
+
+  const handleSplit = (item: TimelineItem) => {
+    const splitTime = currentTime - item.startTime;
+    if (splitTime > 0 && splitTime < item.duration) {
+      const firstPart = { ...item };
+      const secondPart = {
+        ...item,
+        id: `${item.id}_split_${Date.now()}`,
+        startTime: item.startTime + splitTime,
+        duration: item.duration - splitTime
+      };
+      firstPart.duration = splitTime;
+      
+      const newItems = items.filter(i => i.id !== item.id);
+      onItemsChange([...newItems, firstPart, secondPart]);
+    }
+    setContextMenu(null);
+  };
+
+  const handleDelete = (itemId: string) => {
+    onItemsChange(items.filter(item => item.id !== itemId));
+    setContextMenu(null);
+  };
+
+  // Handle drag start
+  const handleMouseDown = (e: React.MouseEvent, item: TimelineItem, isResize?: 'left' | 'right') => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (isResize) {
+      setResizing({ itemId: item.id, edge: isResize });
+      return;
+    }
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    setDragOffset({
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
+    });
+    setIsDragging(true);
+    setDraggedItem(item.id);
+  };
+
+  // Handle mouse move for dragging and resizing
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (resizing && timelineRef.current) {
+        const rect = timelineRef.current.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left - 80; // Account for track labels
+        const newTime = (mouseX / (rect.width - 80)) * totalDuration;
+        
+        const item = items.find(i => i.id === resizing.itemId);
+        if (!item) return;
+
+        const updatedItems = items.map(i => {
+          if (i.id === resizing.itemId) {
+            if (resizing.edge === 'left') {
+              const maxStartTime = i.startTime + i.duration - 0.1;
+              const newStartTime = Math.max(0, Math.min(newTime, maxStartTime));
+              const durationChange = i.startTime - newStartTime;
+              return {
+                ...i,
+                startTime: newStartTime,
+                duration: i.duration + durationChange
+              };
+            } else {
+              const minEndTime = i.startTime + 0.1;
+              const newEndTime = Math.max(minEndTime, newTime);
+              return {
+                ...i,
+                duration: newEndTime - i.startTime
+              };
+            }
+          }
+          return i;
+        });
+        onItemsChange(updatedItems);
+      } else if (isDragging && draggedItem && timelineRef.current) {
+        const rect = timelineRef.current.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left - 80; // Account for track labels
+        const mouseY = e.clientY - rect.top - 16; // Account for header
+        
+        const newTime = Math.max(0, (mouseX / (rect.width - 80)) * totalDuration);
+        const newTrack = Math.floor(mouseY / 60);
+        
+        const draggedItemData = items.find(i => i.id === draggedItem);
+        if (!draggedItemData) return;
+
+        // Validate track compatibility
+        const isValidTrack = (track: number, mediaType: string) => {
+          if (track < 0 || track > 2) return false;
+          if (mediaType === 'video' || mediaType === 'image') return track === 0;
+          if (mediaType === 'audio') return track === 1 || track === 2;
+          return false;
+        };
+
+        if (isValidTrack(newTrack, draggedItemData.mediaFile.type)) {
+          const updatedItems = items.map(item => 
+            item.id === draggedItem 
+              ? { ...item, startTime: newTime, track: newTrack }
+              : item
+          );
+          onItemsChange(updatedItems);
+        }
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+      setDraggedItem(null);
+      setResizing(null);
+    };
+
+    if (isDragging || resizing) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging, draggedItem, resizing, items, totalDuration, onItemsChange]);
+
   // Render timeline item
   const renderTimelineItem = (item: TimelineItem, track: number) => {
     const left = (item.startTime / totalDuration) * 100;
@@ -71,13 +219,14 @@ export const Timeline = ({
     
     const trackColors = {
       video: 'bg-video-track',
-      audio: 'bg-audio-track'
+      audio: 'bg-audio-track',
+      image: 'bg-video-track' // Images use video track color
     };
     
     return (
       <div
         key={item.id}
-        className={`absolute h-12 rounded border-2 border-white/20 cursor-move transition-all
+        className={`absolute h-12 rounded border-2 border-white/20 cursor-move transition-all group
           ${trackColors[item.mediaFile.type]} ${
           draggedItem === item.id ? 'opacity-50 z-20' : 'z-10'
         }`}
@@ -86,12 +235,22 @@ export const Timeline = ({
           width: `${width}%`,
           top: `${track * 60 + 8}px`
         }}
-        onMouseDown={(e) => {
-          setIsDragging(true);
-          setDraggedItem(item.id);
+        onMouseDown={(e) => handleMouseDown(e, item)}
+        onContextMenu={(e) => {
           e.preventDefault();
+          setContextMenu({ x: e.clientX, y: e.clientY, itemId: item.id });
         }}
       >
+        {/* Resize handles */}
+        <div
+          className="absolute left-0 top-0 w-1 h-full cursor-ew-resize opacity-0 group-hover:opacity-100 bg-white/50"
+          onMouseDown={(e) => handleMouseDown(e, item, 'left')}
+        />
+        <div
+          className="absolute right-0 top-0 w-1 h-full cursor-ew-resize opacity-0 group-hover:opacity-100 bg-white/50"
+          onMouseDown={(e) => handleMouseDown(e, item, 'right')}
+        />
+        
         <div className="p-2 h-full flex items-center justify-between text-white text-xs overflow-hidden">
           <span className="truncate flex-1">{item.mediaFile.name}</span>
           <span className="ml-2 font-mono">{formatTime(item.duration)}</span>
@@ -109,9 +268,10 @@ export const Timeline = ({
     <div className="h-full flex flex-col bg-timeline-bg">
       {/* Timeline Header with Time Markers */}
       <div className="relative h-16 bg-gradient-timeline border-b border-border">
+        <div className="absolute left-0 top-0 w-20 h-full bg-secondary/50 border-r border-border"></div>
         <div
           ref={timelineRef}
-          className="relative h-full cursor-pointer overflow-hidden"
+          className="relative h-full cursor-pointer overflow-hidden ml-20"
           onClick={handleTimelineClick}
         >
           {/* Time Markers */}
@@ -134,8 +294,22 @@ export const Timeline = ({
           {['Video', 'Audio 1', 'Audio 2'].map((label, index) => (
             <div
               key={label}
-              className="h-16 flex items-center justify-center text-xs font-medium text-muted-foreground border-b border-border"
+              className="h-16 flex items-center justify-center text-xs font-medium text-muted-foreground border-b border-border relative"
               style={{ top: `${index * 60}px` }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                if (copiedItem) {
+                  const isValidTrack = (track: number, mediaType: string) => {
+                    if (mediaType === 'video' || mediaType === 'image') return track === 0;
+                    if (mediaType === 'audio') return track === 1 || track === 2;
+                    return false;
+                  };
+                  
+                  if (isValidTrack(index, copiedItem.mediaFile.type)) {
+                    handlePaste(index);
+                  }
+                }
+              }}
             >
               {label}
             </div>
@@ -175,6 +349,49 @@ export const Timeline = ({
           </div>
         </div>
       </div>
+
+      {/* Context Menu */}
+      {contextMenu && (
+        <div
+          className="fixed bg-popover border border-border rounded-md shadow-lg z-50 py-1"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onMouseLeave={() => setContextMenu(null)}
+        >
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start px-3 py-1.5 h-auto text-xs"
+            onClick={() => {
+              const item = items.find(i => i.id === contextMenu.itemId);
+              if (item) handleCopy(item);
+            }}
+          >
+            <Copy className="w-3 h-3 mr-2" />
+            Copy
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start px-3 py-1.5 h-auto text-xs"
+            onClick={() => {
+              const item = items.find(i => i.id === contextMenu.itemId);
+              if (item) handleSplit(item);
+            }}
+          >
+            <Scissors className="w-3 h-3 mr-2" />
+            Split
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start px-3 py-1.5 h-auto text-xs text-destructive hover:text-destructive"
+            onClick={() => handleDelete(contextMenu.itemId)}
+          >
+            <Trash2 className="w-3 h-3 mr-2" />
+            Delete
+          </Button>
+        </div>
+      )}
     </div>
   );
 };
