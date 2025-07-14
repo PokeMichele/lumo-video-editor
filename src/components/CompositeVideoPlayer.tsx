@@ -72,13 +72,15 @@ export const CompositeVideoPlayer = ({
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     if (activeItems.length === 0) {
-      // Mostra messaggio quando non ci sono elementi attivi
+      // Mostra messaggio con icona ciak quando non ci sono elementi attivi
       ctx.fillStyle = '#666666';
-      ctx.font = '24px Arial';
+      ctx.font = '64px Arial';
       ctx.textAlign = 'center';
-      ctx.fillText('No active media at current time', canvas.width / 2, canvas.height / 2);
+      ctx.fillText('🎬', canvas.width / 2, canvas.height / 2 - 40);
+      ctx.font = '24px Arial';
+      ctx.fillText('No active media at current time', canvas.width / 2, canvas.height / 2 + 20);
       ctx.font = '16px Arial';
-      ctx.fillText('Add media to timeline and play to see preview', canvas.width / 2, canvas.height / 2 + 40);
+      ctx.fillText('Add media to timeline and play to see preview', canvas.width / 2, canvas.height / 2 + 50);
       return;
     }
 
@@ -339,7 +341,7 @@ export const CompositeVideoPlayer = ({
         />
       </div>
 
-      {/* Controls */}
+      {/* Controls - Always visible */}
       <Card className="m-4 p-4 bg-card/95 backdrop-blur-sm">
         <div className="flex items-center justify-between">
           {/* Playback Controls */}
@@ -349,6 +351,7 @@ export const CompositeVideoPlayer = ({
               size="sm"
               onClick={handleSeekBackward}
               className="hover:bg-accent"
+              disabled={timelineItems.length === 0}
             >
               <SkipBack className="w-4 h-4" />
             </Button>
@@ -357,6 +360,7 @@ export const CompositeVideoPlayer = ({
               onClick={handlePlayPause}
               size="lg"
               className="bg-gradient-primary hover:opacity-90"
+              disabled={timelineItems.length === 0}
             >
               {isPlaying ? (
                 <Pause className="w-5 h-5" />
@@ -370,6 +374,7 @@ export const CompositeVideoPlayer = ({
               size="sm"
               onClick={handleSeekForward}
               className="hover:bg-accent"
+              disabled={timelineItems.length === 0}
             >
               <SkipForward className="w-4 h-4" />
             </Button>
@@ -378,6 +383,11 @@ export const CompositeVideoPlayer = ({
           {/* Time Display */}
           <div className="text-sm text-muted-foreground font-mono">
             {formatTime(currentTime)}
+            {timelineItems.length === 0 && (
+              <span className="ml-2 text-xs opacity-60">
+                (Add media to timeline)
+              </span>
+            )}
           </div>
 
           {/* Volume Control */}
