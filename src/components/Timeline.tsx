@@ -45,7 +45,11 @@ export const Timeline = ({
   const [resizing, setResizing] = useState<{ itemId: string; edge: 'left' | 'right' } | null>(null);
   const [scrollLeft, setScrollLeft] = useState(0);
   
-  // Stato semplificato per il drag
+  // Stati per il magnetic snap
+  const [snapThreshold] = useState(15); // pixels per il snap
+  const [activeSnapLines, setActiveSnapLines] = useState<number[]>([]);
+  
+  // Stato per il drag con snap
   const [dragState, setDragState] = useState<{
     startX: number;
     startY: number;
@@ -53,6 +57,9 @@ export const Timeline = ({
     originalTrack: number;
     currentStartTime: number;
     currentTrack: number;
+    snapPoints: { time: number; type: 'start' | 'end' | 'timeline-start' }[];
+    potentialSnapTime?: number; // Tempo di snap potenziale
+    isInSnapRange: boolean; // Se è dentro la soglia di snap
   } | null>(null);
 
   // Limiti per lo zoom
@@ -208,6 +215,56 @@ export const Timeline = ({
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // Calculate snap points for magnetic borders
+  const calculateSnapPoints = useCallback((draggedItemId: string, targetTrack: number) => {
+    const snapPoints: { time: number; type: 'start' | 'end' | 'timeline-start' }[] = [];
+
+    // Always snap to timeline start
+    snapPoints.push({ time: 0, type: 'timeline-start' });
+
+    // Get all items in the same track except the dragged one
+    const otherItemsInTrack = items.filter(item =>
+      item.track === targetTrack && item.id !== draggedItemId
+    );
+
+    // Add start and end points of all other items
+    otherItemsInTrack.forEach(item => {
+      snapPoints.push({ time: item.startTime, type: 'start' });
+      snapPoints.push({ time: item.startTime + item.duration, type: 'end' });
+    });
+
+    return snapPoints.sort((a, b) => a.time - b.time);
+  }, [items]);
+
+  // Find potential snap point (per il feedback visivo)
+  const findPotentialSnapPoint = useCallback((currentTime: number, duration: number, snapPoints: { time: number; type: 'start' | 'end' | 'timeline-start' }[]) => {
+    const snapThresholdTime = snapThreshold / scale;
+    
+    // Controlla snap per l'inizio dell'elemento
+    for (const snapPoint of snapPoints) {
+      if (Math.abs(currentTime - snapPoint.time) <= snapThresholdTime) {
+        return {
+          snapTime: snapPoint.time,
+          snapLine: snapPoint.time,
+          type: 'start'
+        };
+      }
+    }
+    
+    // Controlla snap per la fine dell'elemento
+    for (const snapPoint of snapPoints) {
+      if (Math.abs((currentTime + duration) - snapPoint.time) <= snapThresholdTime) {
+        return {
+          snapTime: snapPoint.time - duration,
+          snapLine: snapPoint.time,
+          type: 'end'
+        };
+      }
+    }
+    
+    return null;
+  }, [scale, snapThreshold]);
+
   // Validate track compatibility
   const isValidTrack = useCallback((track: number, mediaType: string) => {
     if (track < 0 || track > 2) return false;
@@ -265,7 +322,7 @@ export const Timeline = ({
     setContextMenu(null);
   };
 
-  // Handle drag start - SEMPLIFICATO
+  // Handle drag start
   const handleMouseDown = (e: React.MouseEvent, item: TimelineItem, isResize?: 'left' | 'right') => {
     e.preventDefault();
     e.stopPropagation();
@@ -281,111 +338,193 @@ export const Timeline = ({
     const mouseX = e.clientX - rect.left + scrollLeft;
     const mouseY = e.clientY - rect.top;
 
-    // Stato semplificato per il drag
+    // Calcola i punti di snap per la track corrente
+    const snapPoints = calculateSnapPoints(item.id, item.track);
+
+    // Stato del drag con snap
     setDragState({
       startX: mouseX,
       startY: mouseY,
       originalStartTime: item.startTime,
       originalTrack: item.track,
       currentStartTime: item.startTime,
-      currentTrack: item.track
+      currentTrack: item.track,
+      snapPoints,
+      isInSnapRange: false
     });
 
     setIsDragging(true);
     setDraggedItem(item.id);
   };
 
-  // Handle mouse move - SEMPLIFICATO
+  // Handle mouse move con snap magnetico
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!timelineContentRef.current) return;
       const rect = timelineContentRef.current.getBoundingClientRect();
 
       if (resizing) {
-        // Logica di resize semplificata
+        // Logica di resize con snap
         const mouseX = e.clientX - rect.left + scrollLeft;
         const newTime = mouseX / scale;
 
-        const updatedItems = items.map(item => {
-          if (item.id === resizing.itemId) {
+        const item = items.find(i => i.id === resizing.itemId);
+        if (!item) return;
+
+        const snapPoints = calculateSnapPoints(resizing.itemId, item.track);
+        const snapThresholdTime = snapThreshold / scale;
+
+        const updatedItems = items.map(i => {
+          if (i.id === resizing.itemId) {
             if (resizing.edge === 'left') {
-              const maxStartTime = item.startTime + item.duration - 0.1;
-              const newStartTime = Math.max(0, Math.min(newTime, maxStartTime));
-              const durationChange = item.startTime - newStartTime;
-              
+              const maxStartTime = i.startTime + i.duration - 0.1;
+              let newStartTime = newTime;
+              let snapLineTime: number | undefined;
+
+              // Cerca snap per il resize left
+              for (const snapPoint of snapPoints) {
+                if (Math.abs(newTime - snapPoint.time) <= snapThresholdTime) {
+                  newStartTime = snapPoint.time;
+                  snapLineTime = snapPoint.time;
+                  break;
+                }
+              }
+
+              newStartTime = Math.max(0, Math.min(newStartTime, maxStartTime));
+              const durationChange = i.startTime - newStartTime;
+
+              // Aggiorna snap lines
+              if (snapLineTime !== undefined) {
+                setActiveSnapLines([snapLineTime]);
+              } else {
+                setActiveSnapLines([]);
+              }
+
               return {
-                ...item,
+                ...i,
                 startTime: newStartTime,
-                duration: item.duration + durationChange
+                duration: i.duration + durationChange
               };
             } else {
-              const minEndTime = item.startTime + 0.1;
-              const newEndTime = Math.max(minEndTime, newTime);
-              
+              const minEndTime = i.startTime + 0.1;
+              let newEndTime = newTime;
+              let snapLineTime: number | undefined;
+
+              // Cerca snap per il resize right
+              for (const snapPoint of snapPoints) {
+                if (Math.abs(newTime - snapPoint.time) <= snapThresholdTime) {
+                  newEndTime = snapPoint.time;
+                  snapLineTime = snapPoint.time;
+                  break;
+                }
+              }
+
+              newEndTime = Math.max(minEndTime, newEndTime);
+
+              // Aggiorna snap lines
+              if (snapLineTime !== undefined) {
+                setActiveSnapLines([snapLineTime]);
+              } else {
+                setActiveSnapLines([]);
+              }
+
               return {
-                ...item,
-                duration: newEndTime - item.startTime
+                ...i,
+                duration: newEndTime - i.startTime
               };
             }
           }
-          return item;
+          return i;
         });
         
         onItemsChange(updatedItems);
       } else if (isDragging && draggedItem && dragState) {
-        // Logica di drag MOLTO semplificata
+        // Logica di drag con snap magnetico
         const mouseX = e.clientX - rect.left + scrollLeft;
         const mouseY = e.clientY - rect.top - 16;
 
         const deltaX = mouseX - dragState.startX;
         const deltaY = mouseY - dragState.startY;
 
-        // Calcola nuova posizione
-        const newStartTime = Math.max(0, dragState.originalStartTime + deltaX / scale);
+        // Calcola nuova posizione senza snap
+        const rawNewTime = Math.max(0, dragState.originalStartTime + deltaX / scale);
         const newTrack = Math.max(0, Math.min(2, dragState.originalTrack + Math.round(deltaY / 60)));
+
+        const draggedItemData = items.find(i => i.id === draggedItem);
+        if (!draggedItemData) return;
+
+        // Aggiorna i punti di snap se cambia track
+        let currentSnapPoints = dragState.snapPoints;
+        if (newTrack !== dragState.currentTrack) {
+          currentSnapPoints = calculateSnapPoints(draggedItem, newTrack);
+        }
+
+        // Trova potenziale snap point
+        const potentialSnap = findPotentialSnapPoint(rawNewTime, draggedItemData.duration, currentSnapPoints);
+        
+        let finalTime = rawNewTime;
+        let snapLines: number[] = [];
+        let isInSnapRange = false;
+
+        if (potentialSnap) {
+          // Mostra la linea di snap
+          snapLines = [potentialSnap.snapLine];
+          isInSnapRange = true;
+          // Ma NON applica lo snap durante il movimento - lascia libertà di movimento
+        }
 
         // Aggiorna lo stato del drag
         setDragState(prev => prev ? {
           ...prev,
-          currentStartTime: newStartTime,
-          currentTrack: newTrack
+          currentStartTime: finalTime,
+          currentTrack: newTrack,
+          snapPoints: currentSnapPoints,
+          potentialSnapTime: potentialSnap?.snapTime,
+          isInSnapRange
         } : null);
 
-        // Aggiorna gli items in tempo reale
-        const updatedItems = items.map(item => {
-          if (item.id === draggedItem) {
-            const draggedItemData = items.find(i => i.id === draggedItem);
-            if (draggedItemData && isValidTrack(newTrack, draggedItemData.mediaFile.type)) {
+        // Aggiorna le linee di snap
+        setActiveSnapLines(snapLines);
+
+        // Aggiorna la posizione dell'elemento in tempo reale (sempre movimento libero)
+        if (isValidTrack(newTrack, draggedItemData.mediaFile.type)) {
+          const updatedItems = items.map(item => {
+            if (item.id === draggedItem) {
               return {
                 ...item,
-                startTime: newStartTime,
+                startTime: finalTime,
                 track: newTrack
               };
             }
-          }
-          return item;
-        });
-
-        onItemsChange(updatedItems);
+            return item;
+          });
+          onItemsChange(updatedItems);
+        }
       }
     };
 
     const handleMouseUp = () => {
       if (isDragging && draggedItem && dragState) {
-        // Applica la posizione finale - SEMPLIFICATO
+        // Al rilascio: applica lo snap solo se siamo dentro la soglia
         const draggedItemData = items.find(i => i.id === draggedItem);
         if (draggedItemData) {
+          let finalTime = dragState.currentStartTime;
+          
+          // Applica snap solo se è dentro la soglia E abbiamo un tempo di snap
+          if (dragState.isInSnapRange && dragState.potentialSnapTime !== undefined) {
+            finalTime = dragState.potentialSnapTime;
+          }
+
           const finalItems = items.map(item => {
             if (item.id === draggedItem) {
-              // Verifica solo se il track è valido
               if (isValidTrack(dragState.currentTrack, draggedItemData.mediaFile.type)) {
                 return {
                   ...item,
-                  startTime: dragState.currentStartTime,
+                  startTime: finalTime,
                   track: dragState.currentTrack
                 };
               } else {
-                // Se il track non è valido, ripristina la posizione originale
+                // Track non valido, ripristina posizione originale
                 return {
                   ...item,
                   startTime: dragState.originalStartTime,
@@ -406,6 +545,7 @@ export const Timeline = ({
       setDraggedItem(null);
       setDragState(null);
       setResizing(null);
+      setActiveSnapLines([]);
     };
 
     if (isDragging || resizing) {
@@ -417,9 +557,10 @@ export const Timeline = ({
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDragging, draggedItem, dragState, resizing, items, scale, scrollLeft, isValidTrack, onItemsChange, onItemsChangeWithHistory]);
+  }, [isDragging, draggedItem, dragState, resizing, items, scale, scrollLeft, 
+      calculateSnapPoints, findPotentialSnapPoint, isValidTrack, onItemsChange, onItemsChangeWithHistory]);
 
-  // Render timeline item - SEMPLIFICATO
+  // Render timeline item
   const renderTimelineItem = (item: TimelineItem, track: number) => {
     const isDraggedItem = draggedItem === item.id;
     
@@ -595,6 +736,15 @@ export const Timeline = ({
                 );
               })}
             </div>
+
+            {/* Snap Lines (barrette gialle) */}
+            {activeSnapLines.map((snapTime, index) => (
+              <div
+                key={`snap-${index}`}
+                className="absolute top-0 bottom-0 w-0.5 bg-yellow-400 pointer-events-none z-40 shadow-lg"
+                style={{ left: `${snapTime * scale}px` }}
+              />
+            ))}
           </div>
         </div>
       </div>
