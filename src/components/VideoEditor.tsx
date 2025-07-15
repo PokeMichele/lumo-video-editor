@@ -185,8 +185,8 @@ export const VideoEditor = () => {
 
         {/* Right Panel - Diviso in due sezioni */}
         <div className="flex-1 flex flex-col">
-          {/* Video Player - LIMITATO A METÀ ALTEZZA */}
-          <div className="flex-1 relative bg-card border-b border-border">
+          {/* Video Player - AREA PRINCIPALE CON DIMENSIONI FISSE */}
+          <div className="relative bg-card border-b border-border" style={{ height: 'calc(100vh - 400px)' }}>
             <div className="absolute top-4 right-4 z-10">
               <Button
                 onClick={handleExport}
@@ -198,30 +198,30 @@ export const VideoEditor = () => {
               </Button>
             </div>
 
-            <CompositeVideoPlayer
-              timelineItems={timelineItems}
-              currentTime={currentTime}
-              isPlaying={isPlaying}
-              onTimeUpdate={setCurrentTime}
-              onPlayStateChange={setIsPlaying}
-            />
+            <div className="h-full overflow-hidden">
+              <CompositeVideoPlayer
+                timelineItems={timelineItems}
+                currentTime={currentTime}
+                isPlaying={isPlaying}
+                onTimeUpdate={setCurrentTime}
+                onPlayStateChange={setIsPlaying}
+              />
+            </div>
           </div>
 
-          {/* Area inferiore - Controlli aggiuntivi */}
-          <div className="h-20 bg-muted/10 flex items-center justify-center p-6">
-            <div className="text-center text-muted-foreground">
-              <h3 className="text-lg font-semibold mb-2">Additional Controls</h3>
-              <div className="space-x-2">
-                <Button variant="outline" size="sm">Aggiungi Effetto</Button>
-                <Button variant="outline" size="sm">Regola Colori</Button>
-                <Button variant="outline" size="sm">Audio Mix</Button>
-              </div>
+          {/* Area inferiore - Controlli aggiuntivi RIDOTTI */}
+          <div className="h-16 bg-muted/10 flex items-center justify-center px-6 border-b border-border">
+            <div className="flex items-center space-x-3">
+              <span className="text-sm font-medium text-muted-foreground">Quick Tools:</span>
+              <Button variant="outline" size="sm">Effetti</Button>
+              <Button variant="outline" size="sm">Colori</Button>
+              <Button variant="outline" size="sm">Audio</Button>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Bottom Panel - Timeline ridotta a 1/3 */}
+      {/* Bottom Panel - Timeline */}
       <div className="h-1/3 border-t border-border bg-timeline-bg">
         <Timeline
           items={timelineItems}
