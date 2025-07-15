@@ -184,83 +184,93 @@ export const Timeline = ({
     return snapPoints.sort((a, b) => a.time - b.time);
   }, [items]);
 
-  // FIXED: Find the closest snap point with corrected magnetic snapping logic
-  const findSnapPoint = useCallback((currentTime: number, snapPoints: { time: number; type: 'start' | 'end' | 'timeline-start' }[], draggedItemDuration: number): { 
-    time: number; 
-    snapped: boolean; 
-    snapLine?: number; 
-    showSnapLine?: boolean 
+  // Check if a position would cause overlap with other items
+  const wouldCauseOverlap = useCallback((startTime: number, duration: number, track: number, excludeId: string) => {
+    const itemEnd = startTime + duration;
+
+    return items.some(item => {
+      if (item.id === excludeId || item.track !== track) return false;
+
+      const otherStart = item.startTime;
+      const otherEnd = item.startTime + item.duration;
+
+      // Check for overlap: items overlap if one starts before the other ends
+      return (startTime < otherEnd && itemEnd > otherStart);
+    });
+  }, [items]);
+
+  // FIXED: Find the closest snap point with collision detection
+  const findSnapPoint = useCallback((currentTime: number, snapPoints: { time: number; type: 'start' | 'end' | 'timeline-start' }[], draggedItemDuration: number, targetTrack: number, draggedItemId: string): {
+    time: number;
+    snapped: boolean;
+    snapLine?: number;
+    showSnapLine?: boolean
   } => {
     const snapThresholdTime = snapThreshold / scale;
     const visualSnapThresholdTime = visualSnapThreshold / scale;
 
-    let closestSnapPoint: { 
-      time: number; 
-      type: 'start' | 'end' | 'timeline-start'; 
-      snapEdge: 'start' | 'end';
+    let bestSnapOption: {
+      time: number;
+      snapTime: number;
       distance: number;
+      snapEdge: 'start' | 'end';
     } | null = null;
 
     const draggedItemStart = currentTime;
     const draggedItemEnd = currentTime + draggedItemDuration;
 
-    // Find the closest snap point
+    // Evaluate each snap point
     for (const snapPoint of snapPoints) {
-      // Check distance from dragged item's START to snap point
-      const startDistance = Math.abs(draggedItemStart - snapPoint.time);
-      if (!closestSnapPoint || startDistance < closestSnapPoint.distance) {
-        closestSnapPoint = {
-          ...snapPoint,
-          snapEdge: 'start',
-          distance: startDistance
-        };
+      // Option 1: Snap dragged item's START to this snap point
+      const startSnapDistance = Math.abs(draggedItemStart - snapPoint.time);
+      if (startSnapDistance <= visualSnapThresholdTime) {
+        const potentialStartTime = snapPoint.time;
+
+        // Check if this would cause overlap
+        if (!wouldCauseOverlap(potentialStartTime, draggedItemDuration, targetTrack, draggedItemId)) {
+          if (!bestSnapOption || startSnapDistance < bestSnapOption.distance) {
+            bestSnapOption = {
+              time: potentialStartTime,
+              snapTime: snapPoint.time,
+              distance: startSnapDistance,
+              snapEdge: 'start'
+            };
+          }
+        }
       }
 
-      // Check distance from dragged item's END to snap point  
-      const endDistance = Math.abs(draggedItemEnd - snapPoint.time);
-      if (endDistance < closestSnapPoint.distance) {
-        closestSnapPoint = {
-          ...snapPoint,
-          snapEdge: 'end',
-          distance: endDistance
-        };
+      // Option 2: Snap dragged item's END to this snap point
+      const endSnapDistance = Math.abs(draggedItemEnd - snapPoint.time);
+      if (endSnapDistance <= visualSnapThresholdTime) {
+        const potentialStartTime = snapPoint.time - draggedItemDuration;
+
+        // Ensure start time is not negative and check overlap
+        if (potentialStartTime >= 0 && !wouldCauseOverlap(potentialStartTime, draggedItemDuration, targetTrack, draggedItemId)) {
+          if (!bestSnapOption || endSnapDistance < bestSnapOption.distance) {
+            bestSnapOption = {
+              time: potentialStartTime,
+              snapTime: snapPoint.time,
+              distance: endSnapDistance,
+              snapEdge: 'end'
+            };
+          }
+        }
       }
     }
 
-    if (!closestSnapPoint) {
+    if (!bestSnapOption) {
       return { time: currentTime, snapped: false, showSnapLine: false };
     }
 
-    const { distance, snapEdge, type, time: snapTime } = closestSnapPoint;
-    const showSnapLine = distance <= visualSnapThresholdTime;
-    const shouldSnap = distance <= snapThresholdTime;
-
-    if (!showSnapLine) {
-      return { time: currentTime, snapped: false, showSnapLine: false };
-    }
-
-    let finalTime = currentTime;
-
-    if (shouldSnap) {
-      if (snapEdge === 'start') {
-        // Snap dragged item's START to the snap point
-        finalTime = snapTime;
-      } else {
-        // Snap dragged item's END to the snap point
-        finalTime = snapTime - draggedItemDuration;
-      }
-
-      // Ensure finalTime is not negative
-      finalTime = Math.max(0, finalTime);
-    }
+    const shouldSnap = bestSnapOption.distance <= snapThresholdTime;
 
     return {
-      time: shouldSnap ? finalTime : currentTime,
+      time: shouldSnap ? bestSnapOption.time : currentTime,
       snapped: shouldSnap,
-      snapLine: snapTime,
+      snapLine: bestSnapOption.snapTime,
       showSnapLine: true
     };
-  }, [scale, snapThreshold, visualSnapThreshold]);
+  }, [scale, snapThreshold, visualSnapThreshold, wouldCauseOverlap]);
 
   // Validate track compatibility
   const isValidTrack = useCallback((track: number, mediaType: string) => {
@@ -396,7 +406,7 @@ export const Timeline = ({
           if (i.id === resizing.itemId) {
             if (resizing.edge === 'left') {
               const maxStartTime = i.startTime + i.duration - 0.1;
-              const snapResult = findSnapPoint(newTime, snapPoints, i.duration);
+              const snapResult = findSnapPoint(newTime, snapPoints, i.duration, i.track, i.id);
               const newStartTime = Math.max(0, Math.min(snapResult.time, maxStartTime));
               const durationChange = i.startTime - newStartTime;
 
@@ -413,7 +423,7 @@ export const Timeline = ({
               };
             } else {
               const minEndTime = i.startTime + 0.1;
-              const snapResult = findSnapPoint(newTime, snapPoints, i.duration);
+              const snapResult = findSnapPoint(newTime, snapPoints, i.duration, i.track, i.id);
               const newEndTime = Math.max(minEndTime, snapResult.time);
 
               if (snapResult.showSnapLine && snapResult.snapLine !== undefined) {
@@ -453,8 +463,8 @@ export const Timeline = ({
             dragStateRef.current.startTrack = newTrack;
           }
 
-          // FIXED: Calcola lo snap usando la durata corretta
-          const snapResult = findSnapPoint(rawTime, snapPoints, dragStateRef.current.draggedItemDuration);
+          // FIXED: Calcola lo snap usando la durata corretta e controllo collisioni
+          const snapResult = findSnapPoint(rawTime, snapPoints, dragStateRef.current.draggedItemDuration, newTrack, draggedItem);
           const finalTime = snapResult.time;
 
           // Update snap lines
@@ -482,7 +492,7 @@ export const Timeline = ({
               ? { ...item, startTime: finalTime, track: newTrack }
               : item
           );
-          
+
           // Use throttled update but pass the preview for synchronization
           throttledUpdateItems(updatedItems, newDragPreview);
         } else {
@@ -533,11 +543,11 @@ export const Timeline = ({
   // FIXED: Render timeline item with improved drag preview handling
   const renderTimelineItem = (item: TimelineItem, track: number) => {
     const isDraggedItem = draggedItem === item.id;
-    
+
     // FIXED: Use drag preview data if available, otherwise use item data
     let displayStartTime = item.startTime;
     let displayTrack = track;
-    
+
     if (isDraggedItem && dragPreview) {
       displayStartTime = dragPreview.startTime;
       displayTrack = dragPreview.track;
