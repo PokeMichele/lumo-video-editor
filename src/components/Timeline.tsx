@@ -148,14 +148,30 @@ export const Timeline = ({
       markers.push(
         <div
           key={i}
-          className="absolute top-0 flex flex-col items-center"
+          className="absolute top-0"
           style={{ left: `${position}px` }}
         >
-          {/* Linea sempre centrata */}
-          <div className="w-px h-4 bg-timeline-ruler"></div>
-          {/* Testo: centrato per tutti tranne il primo che è allineato a sinistra */}
+          {/* Linea sempre a left: 0 rispetto al suo container */}
+          <div 
+            className="bg-timeline-ruler"
+            style={{
+              width: '1px',
+              height: '16px',
+              position: 'absolute',
+              left: '0px',
+              top: '0px'
+            }}
+          ></div>
+          {/* Testo posizionato in base al marker */}
           <span 
-            className={`text-xs text-muted-foreground mt-1 font-mono ${isFirstMarker ? 'self-start' : ''}`}
+            className="text-xs text-muted-foreground font-mono"
+            style={{
+              position: 'absolute',
+              top: '20px',
+              left: isFirstMarker ? '0px' : '-20px', // Prima: allineato a sinistra, altri: centrati
+              minWidth: '40px',
+              textAlign: isFirstMarker ? 'left' : 'center'
+            }}
           >
             {formatTime(i)}
           </span>
@@ -701,11 +717,22 @@ export const Timeline = ({
 
             {/* FIXED: Playhead with properly centered diamond */}
             <div
-              className="absolute top-0 bottom-0 w-0.5 bg-playhead z-30 pointer-events-none"
-              style={{ left: `${playheadPosition}px` }}
+              className="absolute top-0 bottom-0 bg-playhead z-30 pointer-events-none"
+              style={{ 
+                left: `${playheadPosition}px`,
+                width: '2px'
+              }}
             >
-              {/* FIXED: Diamante perfettamente centrato sulla linea (linea è 2px, diamante 16px, quindi -7px per centrare) */}
-              <div className="absolute -top-1 w-4 h-4 bg-playhead rotate-45 transform" style={{ left: '-7px' }}></div>
+              {/* FIXED: Diamante perfettamente centrato (linea 2px, diamante 16px, quindi -7px per centrare) */}
+              <div 
+                className="absolute bg-playhead rotate-45" 
+                style={{ 
+                  top: '-4px',
+                  left: '-7px',
+                  width: '16px',
+                  height: '16px'
+                }}
+              ></div>
             </div>
           </div>
         </div>
