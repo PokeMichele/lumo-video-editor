@@ -204,82 +204,93 @@ export const Timeline = ({
     });
   }, [items]);
 
-  // FIXED: Logica di snap completamente riscritta per eliminare sovrapposizioni visive
+  // FIXED: Logica di snap con gap visivo per evitare sovrapposizioni
   const findSnapPoint = useCallback((currentTime: number, snapPoints: { time: number; type: 'start' | 'end' | 'timeline-start' }[], draggedItemDuration: number, targetTrack: number, draggedItemId: string): { 
     time: number; 
     snapped: boolean; 
     snapLine?: number; 
     showSnapLine?: boolean 
   } => {
-    // FIXED: Threshold più piccolo e più preciso
     const snapThresholdTime = snapThreshold / scale;
-    const minGap = 0.1; // Gap minimo tra elementi per evitare sovrapposizioni visive
+    const visualGap = 2 / scale; // FIXED: Gap visivo di 2 pixel convertito in tempo
 
     let bestSnapResult: { 
       elementStartTime: number;
       snapLinePosition: number;
       distance: number;
+      snapType: 'start-to-point' | 'end-to-point';
     } | null = null;
 
     const draggedItemStart = currentTime;
     const draggedItemEnd = currentTime + draggedItemDuration;
 
+    // Trova tutti gli elementi nel track di destinazione (escluso quello trascinato)
+    const otherItemsInTrack = items.filter(item => 
+      item.track === targetTrack && item.id !== draggedItemId
+    );
+
     // Valuta ogni snap point
     for (const snapPoint of snapPoints) {
+      // Determina che tipo di punto è questo snap point
+      const isStartOfOtherItem = otherItemsInTrack.some(item => 
+        Math.abs(item.startTime - snapPoint.time) < 0.001
+      );
+      const isEndOfOtherItem = otherItemsInTrack.some(item => 
+        Math.abs((item.startTime + item.duration) - snapPoint.time) < 0.001
+      );
       
-      // Opzione 1: Connetti INIZIO dell'elemento trascinato a questo snap point
+      // Opzione 1: Connetti INIZIO dell'elemento trascinato vicino a questo snap point
       const startSnapDistance = Math.abs(draggedItemStart - snapPoint.time);
       if (startSnapDistance <= snapThresholdTime) {
-        const elementStartTime = snapPoint.time;
+        let elementStartTime: number;
         
-        // FIXED: Controllo più rigoroso per evitare sovrapposizioni
+        if (snapPoint.time === 0) {
+          // Snap all'inizio della timeline - nessun gap necessario
+          elementStartTime = 0;
+        } else if (isEndOfOtherItem) {
+          // L'inizio del nostro elemento si attacca alla FINE di un altro elemento
+          // Aggiungi un piccolo gap visivo
+          elementStartTime = snapPoint.time + visualGap;
+        } else {
+          // Snap generico - usa il punto esatto
+          elementStartTime = snapPoint.time;
+        }
+        
+        // Verifica che non causi sovrapposizioni
         if (elementStartTime >= 0 && !wouldCauseOverlap(elementStartTime, draggedItemDuration, targetTrack, draggedItemId)) {
-          // Verifica ulteriore: assicurati che non ci siano elementi troppo vicini
-          const hasNearbyConflict = items.some(item => {
-            if (item.id === draggedItemId || item.track !== targetTrack) return false;
-            const distance = Math.min(
-              Math.abs(elementStartTime - item.startTime),
-              Math.abs(elementStartTime - (item.startTime + item.duration)),
-              Math.abs((elementStartTime + draggedItemDuration) - item.startTime),
-              Math.abs((elementStartTime + draggedItemDuration) - (item.startTime + item.duration))
-            );
-            return distance < minGap && distance > 0.001;
-          });
-
-          if (!hasNearbyConflict && (!bestSnapResult || startSnapDistance < bestSnapResult.distance)) {
+          if (!bestSnapResult || startSnapDistance < bestSnapResult.distance) {
             bestSnapResult = {
               elementStartTime: elementStartTime,
-              snapLinePosition: snapPoint.time,
-              distance: startSnapDistance
+              snapLinePosition: snapPoint.time, // La linea appare sempre nel punto di contatto
+              distance: startSnapDistance,
+              snapType: 'start-to-point'
             };
           }
         }
       }
 
-      // Opzione 2: Connetti FINE dell'elemento trascinato a questo snap point
+      // Opzione 2: Connetti FINE dell'elemento trascinato vicino a questo snap point  
       const endSnapDistance = Math.abs(draggedItemEnd - snapPoint.time);
       if (endSnapDistance <= snapThresholdTime) {
-        const elementStartTime = snapPoint.time - draggedItemDuration;
+        let elementStartTime: number;
         
-        // FIXED: Controllo più rigoroso per evitare sovrapposizioni
+        if (isStartOfOtherItem) {
+          // La fine del nostro elemento si attacca all'INIZIO di un altro elemento
+          // Aggiungi un piccolo gap visivo
+          elementStartTime = snapPoint.time - draggedItemDuration - visualGap;
+        } else {
+          // Snap generico - la fine dell'elemento coincide con il punto
+          elementStartTime = snapPoint.time - draggedItemDuration;
+        }
+        
+        // Verifica che non causi sovrapposizioni e che non vada in negativo
         if (elementStartTime >= 0 && !wouldCauseOverlap(elementStartTime, draggedItemDuration, targetTrack, draggedItemId)) {
-          // Verifica ulteriore: assicurati che non ci siano elementi troppo vicini
-          const hasNearbyConflict = items.some(item => {
-            if (item.id === draggedItemId || item.track !== targetTrack) return false;
-            const distance = Math.min(
-              Math.abs(elementStartTime - item.startTime),
-              Math.abs(elementStartTime - (item.startTime + item.duration)),
-              Math.abs((elementStartTime + draggedItemDuration) - item.startTime),
-              Math.abs((elementStartTime + draggedItemDuration) - (item.startTime + item.duration))
-            );
-            return distance < minGap && distance > 0.001;
-          });
-
-          if (!hasNearbyConflict && (!bestSnapResult || endSnapDistance < bestSnapResult.distance)) {
+          if (!bestSnapResult || endSnapDistance < bestSnapResult.distance) {
             bestSnapResult = {
               elementStartTime: elementStartTime,
-              snapLinePosition: snapPoint.time,
-              distance: endSnapDistance
+              snapLinePosition: snapPoint.time, // La linea appare sempre nel punto di contatto
+              distance: endSnapDistance,
+              snapType: 'end-to-point'
             };
           }
         }
