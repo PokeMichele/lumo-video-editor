@@ -400,23 +400,14 @@ export const CompositeVideoPlayer = ({
       }
     });
 
-    // HUD con informazioni
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-    ctx.fillRect(10, 10, 350, 80);
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 16px Arial';
-    ctx.textAlign = 'left';
-    ctx.fillText(`Time: ${currentTime.toFixed(1)}s`, 20, 30);
-    ctx.font = '12px Arial';
-    ctx.fillText(`Active Items: ${activeItems.length}`, 20, 50);
-    ctx.fillText(`Total Timeline Items: ${timelineItems.length}`, 20, 65);
-    if (!userInteracted) {
-      ctx.fillStyle = '#ffaa00';
-      ctx.fillText(`⚠️ Click to enable audio`, 20, 80);
-    } else {
-      ctx.fillStyle = '#00ff00';
-      ctx.fillText(`🔊 Audio enabled`, 20, 80);
-    }
+// HUD minimale: solo messaggio audio
+if (!userInteracted) {
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+  ctx.fillRect(10, 10, 250, 30);
+  ctx.fillStyle = '#ffaa00';
+  ctx.font = '12px Arial';
+  ctx.fillText(`⚠️ Click to enable audio`, 20, 30);
+}
 
   }, [currentTime, timelineItems, getActiveItems, userInteracted]);
 
