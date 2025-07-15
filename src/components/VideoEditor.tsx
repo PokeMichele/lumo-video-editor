@@ -186,7 +186,7 @@ export const VideoEditor = () => {
         {/* Right Panel - Diviso in due sezioni */}
         <div className="flex-1 flex flex-col">
           {/* Video Player - LIMITATO A METÀ ALTEZZA */}
-          <div className="h-1/2 relative bg-card border-b border-border">
+          <div className="flex-1 relative bg-card border-b border-border">
             <div className="absolute top-4 right-4 z-10">
               <Button
                 onClick={handleExport}
@@ -208,7 +208,7 @@ export const VideoEditor = () => {
           </div>
 
           {/* Area inferiore - Controlli aggiuntivi */}
-          <div className="h-1/4 bg-muted/10 flex items-center justify-center p-6">
+          <div className="h-20 bg-muted/10 flex items-center justify-center p-6">
             <div className="text-center text-muted-foreground">
               <h3 className="text-lg font-semibold mb-2">Additional Controls</h3>
               <div className="space-x-2">
