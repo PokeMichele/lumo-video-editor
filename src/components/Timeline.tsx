@@ -815,6 +815,18 @@ export const Timeline = ({
     }
   };
 
+  // Handle context menu su area vuota della timeline
+  const handleTimelineContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    // Mostra il menu solo se c'è contenuto da incollare
+    if (hasContentToPaste) {
+      setContextMenu({ 
+        x: e.clientX, 
+        y: e.clientY 
+      });
+    }
+  };
+
   // Handle mouse move con snap magnetico
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -1372,6 +1384,7 @@ export const Timeline = ({
           onScroll={handleTimelineContentScroll}
           ref={timelineContentRef}
           onMouseDown={handleTimelineMouseDown}
+          onContextMenu={handleTimelineContextMenu}
           style={{
             scrollbarWidth: 'thin',
             scrollbarColor: '#374151 #1f2937'
@@ -1439,46 +1452,52 @@ export const Timeline = ({
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onMouseLeave={() => setContextMenu(null)}
         >
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full justify-start px-3 py-1.5 h-auto text-xs"
-            onClick={() => {
-              if (contextMenu.selectedItems && contextMenu.selectedItems.length > 1) {
-                // Copia multipla
-                handleCopy();
-              } else if (contextMenu.itemId) {
-                // Copia singola
-                const item = items.find(i => i.id === contextMenu.itemId);
-                if (item) handleCopy(item);
-              }
-            }}
-          >
-            <Copy className="w-3 h-3 mr-2" />
-            {contextMenu.selectedItems ? `Copy ${contextMenu.selectedItems.length} items` : 'Copy'}
-            <span className="ml-auto text-xs text-muted-foreground">Ctrl+C</span>
-          </Button>
+          {/* Mostra Copy e Cut solo se ci sono elementi selezionati o un itemId specifico */}
+          {(contextMenu.itemId || (contextMenu.selectedItems && contextMenu.selectedItems.length > 0)) && (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-full justify-start px-3 py-1.5 h-auto text-xs"
+                onClick={() => {
+                  if (contextMenu.selectedItems && contextMenu.selectedItems.length > 1) {
+                    // Copia multipla
+                    handleCopy();
+                  } else if (contextMenu.itemId) {
+                    // Copia singola
+                    const item = items.find(i => i.id === contextMenu.itemId);
+                    if (item) handleCopy(item);
+                  }
+                }}
+              >
+                <Copy className="w-3 h-3 mr-2" />
+                {contextMenu.selectedItems ? `Copy ${contextMenu.selectedItems.length} items` : 'Copy'}
+                <span className="ml-auto text-xs text-muted-foreground">Ctrl+C</span>
+              </Button>
 
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full justify-start px-3 py-1.5 h-auto text-xs"
-            onClick={() => {
-              if (contextMenu.selectedItems && contextMenu.selectedItems.length > 1) {
-                // Taglia multiplo
-                handleCut();
-              } else if (contextMenu.itemId) {
-                // Taglia singolo
-                const item = items.find(i => i.id === contextMenu.itemId);
-                if (item) handleCut(item);
-              }
-            }}
-          >
-            <Scissors className="w-3 h-3 mr-2" />
-            {contextMenu.selectedItems ? `Cut ${contextMenu.selectedItems.length} items` : 'Cut'}
-            <span className="ml-auto text-xs text-muted-foreground">Ctrl+X</span>
-          </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-full justify-start px-3 py-1.5 h-auto text-xs"
+                onClick={() => {
+                  if (contextMenu.selectedItems && contextMenu.selectedItems.length > 1) {
+                    // Taglia multiplo
+                    handleCut();
+                  } else if (contextMenu.itemId) {
+                    // Taglia singolo
+                    const item = items.find(i => i.id === contextMenu.itemId);
+                    if (item) handleCut(item);
+                  }
+                }}
+              >
+                <Scissors className="w-3 h-3 mr-2" />
+                {contextMenu.selectedItems ? `Cut ${contextMenu.selectedItems.length} items` : 'Cut'}
+                <span className="ml-auto text-xs text-muted-foreground">Ctrl+X</span>
+              </Button>
+            </>
+          )}
 
+          {/* Mostra Paste sempre quando c'è contenuto da incollare */}
           {hasContentToPaste && (
             <Button
               variant="ghost"
@@ -1507,7 +1526,7 @@ export const Timeline = ({
             </Button>
           )}
           
-          {/* Split solo per elemento singolo */}
+          {/* Split e Delete solo per elementi specifici */}
           {contextMenu.itemId && !contextMenu.selectedItems && (
             <Button
               variant="ghost"
@@ -1523,22 +1542,24 @@ export const Timeline = ({
             </Button>
           )}
           
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full justify-start px-3 py-1.5 h-auto text-xs text-destructive hover:text-destructive"
-            onClick={() => {
-              if (contextMenu.selectedItems) {
-                handleDelete();
-              } else {
-                handleDelete(contextMenu.itemId);
-              }
-            }}
-          >
-            <Trash2 className="w-3 h-3 mr-2" />
-            {contextMenu.selectedItems ? `Delete ${contextMenu.selectedItems.length} items` : 'Delete'}
-            <span className="ml-auto text-xs text-muted-foreground">Del</span>
-          </Button>
+          {(contextMenu.itemId || (contextMenu.selectedItems && contextMenu.selectedItems.length > 0)) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start px-3 py-1.5 h-auto text-xs text-destructive hover:text-destructive"
+              onClick={() => {
+                if (contextMenu.selectedItems) {
+                  handleDelete();
+                } else {
+                  handleDelete(contextMenu.itemId);
+                }
+              }}
+            >
+              <Trash2 className="w-3 h-3 mr-2" />
+              {contextMenu.selectedItems ? `Delete ${contextMenu.selectedItems.length} items` : 'Delete'}
+              <span className="ml-auto text-xs text-muted-foreground">Del</span>
+            </Button>
+          )}
         </div>
       )}
     </div>
