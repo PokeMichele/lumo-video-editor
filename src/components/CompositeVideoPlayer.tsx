@@ -367,11 +367,9 @@ export const CompositeVideoPlayer = ({
     if (isPlaying) {
       const animate = () => {
         const deltaTime = 0.033; // ~30fps
-        onTimeUpdate((prevTime) => {
-          const newTime = prevTime + deltaTime;
-          lastTimeRef.current = newTime;
-          return newTime;
-        });
+        const newTime = lastTimeRef.current + deltaTime;
+        lastTimeRef.current = newTime;
+        onTimeUpdate(newTime);
         animationFrameRef.current = requestAnimationFrame(animate);
       };
       animationFrameRef.current = requestAnimationFrame(animate);

@@ -182,7 +182,7 @@ export const Timeline = ({
     return snapPoints.sort((a, b) => a.time - b.time); // Sort by time
   }, [items]);
 
-  // Find the closest snap point - OTTIMIZZATO CON SNAP ADIACENTE
+  // Find the closest snap point - FIXED MAGNETIC SNAPPING
   const findSnapPoint = useCallback((currentTime: number, snapPoints: { time: number; type: 'start' | 'end' | 'timeline-start' }[], draggedItemDuration: number): { time: number; snapped: boolean; snapLine?: number; showSnapLine?: boolean } => {
     const snapThresholdTime = snapThreshold / scale; // Convert pixels to time per snapping effettivo
     const visualSnapThresholdTime = visualSnapThreshold / scale; // Convert pixels to time per visualizzazione
@@ -190,17 +190,29 @@ export const Timeline = ({
     let closestSnapPoint: { time: number; type: 'start' | 'end' | 'timeline-start' } | null = null;
     let minDistance = Infinity;
 
-    // Trova il punto di snap più vicino
+    // Check for both start and end snap points of the dragged item
+    const draggedItemStart = currentTime;
+    const draggedItemEnd = currentTime + draggedItemDuration;
+
+    // Find the closest snap point for either start or end of the dragged item
     for (const snapPoint of snapPoints) {
-      const distance = Math.abs(currentTime - snapPoint.time);
-      if (distance < minDistance) {
-        minDistance = distance;
-        closestSnapPoint = snapPoint;
+      // Check distance to start of dragged item
+      const startDistance = Math.abs(draggedItemStart - snapPoint.time);
+      if (startDistance < minDistance) {
+        minDistance = startDistance;
+        closestSnapPoint = { ...snapPoint, snapTo: 'start' } as any;
+      }
+
+      // Check distance to end of dragged item
+      const endDistance = Math.abs(draggedItemEnd - snapPoint.time);
+      if (endDistance < minDistance) {
+        minDistance = endDistance;
+        closestSnapPoint = { ...snapPoint, snapTo: 'end' } as any;
       }
     }
 
     if (closestSnapPoint !== null) {
-      const distance = Math.abs(currentTime - closestSnapPoint.time);
+      const distance = minDistance;
 
       // Mostra la linea se siamo entro la soglia visuale
       const showSnapLine = distance <= visualSnapThresholdTime;
@@ -209,22 +221,22 @@ export const Timeline = ({
       const shouldSnap = distance <= snapThresholdTime;
 
       if (showSnapLine) {
-        let finalTime = closestSnapPoint.time;
+        let finalTime = currentTime;
 
-        // Se dobbiamo effettivamente snappare, calcola la posizione corretta per evitare sovrapposizioni
+        // Se dobbiamo effettivamente snappare, calcola la posizione corretta
         if (shouldSnap) {
-          if (closestSnapPoint.type === 'start') {
-            // Se snappiamo all'inizio di un elemento, posiziona PRIMA di esso
-            finalTime = closestSnapPoint.time - draggedItemDuration;
-            // Assicurati che non vada in negativo
-            finalTime = Math.max(0, finalTime);
-          } else if (closestSnapPoint.type === 'end') {
-            // Se snappiamo alla fine di un elemento, posiziona DOPO di esso
+          const snapTo = (closestSnapPoint as any).snapTo;
+          
+          if (snapTo === 'start') {
+            // Snap start of dragged item to the snap point
             finalTime = closestSnapPoint.time;
-          } else if (closestSnapPoint.type === 'timeline-start') {
-            // Timeline start rimane com'è
-            finalTime = 0;
+          } else if (snapTo === 'end') {
+            // Snap end of dragged item to the snap point
+            finalTime = closestSnapPoint.time - draggedItemDuration;
           }
+
+          // Ensure finalTime is not negative
+          finalTime = Math.max(0, finalTime);
         }
 
         return {
