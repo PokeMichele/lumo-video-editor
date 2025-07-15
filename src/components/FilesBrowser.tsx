@@ -185,12 +185,24 @@ export const FilesBrowser = ({
       {/* Header with Logo and Undo/Redo */}
       <div className="p-4 border-b border-border">
         <div className="flex items-center justify-between mb-4">
-          {/* Logo placeholder */}
+          {/* Logo - OPZIONE 1: Usando un'immagine dalla cartella public */}
           <div className="flex items-center space-x-2">
-            <div className="w-8 h-8 bg-gradient-primary rounded-md flex items-center justify-center">
-              <span className="text-white font-bold text-sm">VE</span>
+            <div className="w-8 h-8 rounded-md overflow-hidden flex items-center justify-center">
+              <img 
+                src="/lumo.png" 
+                alt="Lumo Video Editor Logo" 
+                className="w-full h-full object-contain"
+                onError={(e) => {
+                  // Fallback al logo di default se l'immagine non si carica
+                  e.currentTarget.style.display = 'none';
+                  e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                }}
+              />
+              {/* Fallback logo */}
+              <div className="w-8 h-8 bg-gradient-primary rounded-md flex items-center justify-center hidden">
+                <span className="text-white font-bold text-sm">VE</span>
+              </div>
             </div>
-            <span className="text-sm font-medium text-muted-foreground">Video Editor</span>
           </div>
 
           {/* History indicator and Undo/Redo buttons */}
