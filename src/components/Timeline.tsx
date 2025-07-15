@@ -45,7 +45,7 @@ export const Timeline = ({
   const [resizing, setResizing] = useState<{ itemId: string; edge: 'left' | 'right' } | null>(null);
   const [scrollLeft, setScrollLeft] = useState(0);
   const [initialItemsForDrag, setInitialItemsForDrag] = useState<TimelineItem[] | null>(null);
-  const [snapThreshold] = useState(58); // pixels for snapping - quasi uguale alla soglia visuale
+  const [snapThreshold] = useState(60); // FIXED: Same as visual threshold
   const [visualSnapThreshold] = useState(60); // pixels for showing snap lines
   const [activeSnapLines, setActiveSnapLines] = useState<number[]>([]);
 
@@ -184,9 +184,10 @@ export const Timeline = ({
     return snapPoints.sort((a, b) => a.time - b.time);
   }, [items]);
 
-  // Check if a position would cause overlap with other items
+  // FIXED: Improved collision detection with small tolerance for floating point precision
   const wouldCauseOverlap = useCallback((startTime: number, duration: number, track: number, excludeId: string) => {
     const itemEnd = startTime + duration;
+    const tolerance = 0.001; // Small tolerance for floating point precision
 
     return items.some(item => {
       if (item.id === excludeId || item.track !== track) return false;
@@ -194,8 +195,8 @@ export const Timeline = ({
       const otherStart = item.startTime;
       const otherEnd = item.startTime + item.duration;
 
-      // Check for overlap: items overlap if one starts before the other ends
-      return (startTime < otherEnd && itemEnd > otherStart);
+      // Check for overlap with tolerance: items overlap if one starts before the other ends (with small gap tolerance)
+      return (startTime < otherEnd - tolerance && itemEnd > otherStart + tolerance);
     });
   }, [items]);
 
