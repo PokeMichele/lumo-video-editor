@@ -185,18 +185,18 @@ export const Timeline = ({
   }, [items]);
 
   // FIXED: Find the closest snap point with corrected magnetic snapping logic
-  const findSnapPoint = useCallback((currentTime: number, snapPoints: { time: number; type: 'start' | 'end' | 'timeline-start' }[], draggedItemDuration: number): {
-    time: number;
-    snapped: boolean;
-    snapLine?: number;
-    showSnapLine?: boolean
+  const findSnapPoint = useCallback((currentTime: number, snapPoints: { time: number; type: 'start' | 'end' | 'timeline-start' }[], draggedItemDuration: number): { 
+    time: number; 
+    snapped: boolean; 
+    snapLine?: number; 
+    showSnapLine?: boolean 
   } => {
     const snapThresholdTime = snapThreshold / scale;
     const visualSnapThresholdTime = visualSnapThreshold / scale;
 
-    let closestSnapPoint: {
-      time: number;
-      type: 'start' | 'end' | 'timeline-start';
+    let closestSnapPoint: { 
+      time: number; 
+      type: 'start' | 'end' | 'timeline-start'; 
       snapEdge: 'start' | 'end';
       distance: number;
     } | null = null;
@@ -216,7 +216,7 @@ export const Timeline = ({
         };
       }
 
-      // Check distance from dragged item's END to snap point
+      // Check distance from dragged item's END to snap point  
       const endDistance = Math.abs(draggedItemEnd - snapPoint.time);
       if (endDistance < closestSnapPoint.distance) {
         closestSnapPoint = {
@@ -482,7 +482,7 @@ export const Timeline = ({
               ? { ...item, startTime: finalTime, track: newTrack }
               : item
           );
-
+          
           // Use throttled update but pass the preview for synchronization
           throttledUpdateItems(updatedItems, newDragPreview);
         } else {
@@ -533,11 +533,11 @@ export const Timeline = ({
   // FIXED: Render timeline item with improved drag preview handling
   const renderTimelineItem = (item: TimelineItem, track: number) => {
     const isDraggedItem = draggedItem === item.id;
-
+    
     // FIXED: Use drag preview data if available, otherwise use item data
     let displayStartTime = item.startTime;
     let displayTrack = track;
-
+    
     if (isDraggedItem && dragPreview) {
       displayStartTime = dragPreview.startTime;
       displayTrack = dragPreview.track;
