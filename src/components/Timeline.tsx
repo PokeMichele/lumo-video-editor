@@ -814,44 +814,43 @@ export const Timeline = ({
         // Aggiorna le linee di snap
         setActiveSnapLines(snapLines);
 
-        // Aggiorna la posizione dell'elemento in tempo reale (sempre movimento libero)
-        if (isValidTrack(newTrack, draggedItemData.mediaFile.type)) {
-          const updatedItems = items.map(item => {
-            if (dragState.draggedItems.some(draggedItem => draggedItem.id === item.id)) {
-              // Trova i dati dell'elemento trascinato
-              const draggedItemInfo = dragState.draggedItems.find(di => di.id === item.id);
-              if (!draggedItemInfo) return item;
+        // SEMPRE aggiorna la posizione visiva durante il drag (anche se non valida)
+        // Questo rimuove la "resistenza" permettendo movimento fluido su tutte le tracce
+        // Il feedback visivo indica se la posizione è valida, la validazione finale avviene al rilascio
+        const updatedItems = items.map(item => {
+          if (dragState.draggedItems.some(draggedItem => draggedItem.id === item.id)) {
+            // Trova i dati dell'elemento trascinato
+            const draggedItemInfo = dragState.draggedItems.find(di => di.id === item.id);
+            if (!draggedItemInfo) return item;
 
-              if (item.id === draggedItem) {
-                // Elemento principale - usa la posizione calcolata
+            if (item.id === draggedItem) {
+              // Elemento principale - usa sempre la posizione calcolata per feedback visivo
+              return {
+                ...item,
+                startTime: finalTime,
+                track: newTrack
+              };
+            } else {
+              // Elemento secondario - calcola posizione relativa
+              const newItemTime = finalTime + draggedItemInfo.timeOffset;
+              const newItemTrack = newTrack + draggedItemInfo.trackOffset;
+
+              // Permetti sempre il movimento visivo, anche se non valido
+              if (newItemTime >= 0 && newItemTrack >= 0 && newItemTrack < tracks.length) {
                 return {
                   ...item,
-                  startTime: finalTime,
-                  track: newTrack
+                  startTime: newItemTime,
+                  track: newItemTrack
                 };
               } else {
-                // Elemento secondario - calcola posizione relativa
-                const newItemTime = finalTime + draggedItemInfo.timeOffset;
-                const newItemTrack = newTrack + draggedItemInfo.trackOffset;
-
-                // Verifica se la nuova posizione è valida
-                if (newItemTime >= 0 && newItemTrack >= 0 && newItemTrack < tracks.length && 
-                    isValidTrack(newItemTrack, item.mediaFile.type)) {
-                  return {
-                    ...item,
-                    startTime: newItemTime,
-                    track: newItemTrack
-                  };
-                } else {
-                  // Se la posizione non è valida, mantieni quella originale
-                  return item;
-                }
+                // Se fuori dai limiti della timeline, mantieni posizione originale
+                return item;
               }
             }
-            return item;
-          });
-          onItemsChange(updatedItems);
-        }
+          }
+          return item;
+        });
+        onItemsChange(updatedItems);
       }
     };
 
@@ -879,7 +878,7 @@ export const Timeline = ({
               if (!draggedItemInfo) return item;
 
               if (item.id === draggedItem) {
-                // Elemento principale
+                // Elemento principale - verifica compatibilità traccia
                 if (isValidTrack(dragState.currentTrack, draggedItemData.mediaFile.type)) {
                   return {
                     ...item,
@@ -887,7 +886,7 @@ export const Timeline = ({
                     track: dragState.currentTrack
                   };
                 } else {
-                  // Track non valido, ripristina posizione originale
+                  // Track non valido per l'elemento principale, ripristina posizione originale
                   return {
                     ...item,
                     startTime: dragState.originalStartTime,
@@ -899,7 +898,7 @@ export const Timeline = ({
                 const newItemTime = finalTime + draggedItemInfo.timeOffset;
                 const newItemTrack = dragState.currentTrack + draggedItemInfo.trackOffset;
 
-                // Verifica se la nuova posizione è valida
+                // Verifica se la nuova posizione è valida per questo elemento specifico
                 if (newItemTime >= 0 && newItemTrack >= 0 && newItemTrack < tracks.length && 
                     isValidTrack(newItemTrack, item.mediaFile.type)) {
                   return {
@@ -908,7 +907,7 @@ export const Timeline = ({
                     track: newItemTrack
                   };
                 } else {
-                  // Se la posizione non è valida, ripristina quella originale
+                  // Se la posizione non è valida per questo elemento, ripristina quella originale
                   return {
                     ...item,
                     startTime: draggedItemInfo.originalStartTime,
@@ -952,6 +951,9 @@ export const Timeline = ({
     const isSelected = selectedItems.has(item.id);
     const isPartOfDrag = isDragging && dragState?.draggedItems.some(di => di.id === item.id);
     
+    // Verifica se l'elemento è in una posizione non valida durante il drag
+    const isInvalidPosition = isPartOfDrag && !isValidTrack(track, item.mediaFile.type);
+    
     const left = item.startTime * scale;
     const width = item.duration * scale;
     const topPosition = track * 60 + 8;
@@ -965,14 +967,19 @@ export const Timeline = ({
     return (
       <div
         key={item.id}
-        className={`absolute h-12 rounded border-2 cursor-move transition-none group
+        className={`absolute h-12 rounded border-2 transition-none group
           ${trackColors[item.mediaFile.type]} ${
           isDraggedItem ? 'z-30 opacity-80 shadow-lg' : 
           isPartOfDrag ? 'z-25 opacity-75 shadow-md' : 'z-10'
         } ${
-          isSelected ? 'border-yellow-400 ring-2 ring-yellow-400/50' : 'border-white/20'
+          isSelected ? 'border-yellow-400 ring-2 ring-yellow-400/50' : 
+          isInvalidPosition ? 'border-red-500 ring-2 ring-red-500/50' : 'border-white/20'
         } ${
           isPartOfDrag && !isDraggedItem ? 'ring-2 ring-blue-400/50' : ''
+        } ${
+          isInvalidPosition ? 'opacity-60' : ''
+        } ${
+          isInvalidPosition ? 'cursor-not-allowed' : 'cursor-move'
         }`}
         style={{
           left: `${left}px`,
@@ -1026,6 +1033,12 @@ export const Timeline = ({
               {selectedItems.size}
             </div>
           )}
+          {/* Indicatore di posizione non valida */}
+          {isInvalidPosition && (
+            <div className="absolute -top-1 -left-1 bg-red-500 text-white text-[8px] rounded-full w-3 h-3 flex items-center justify-center">
+              !
+            </div>
+          )}
         </div>
       </div>
     );
@@ -1067,6 +1080,15 @@ export const Timeline = ({
         {selectedItems.size > 0 && (
           <div className="text-[10px] text-yellow-400 mt-1">
             {selectedItems.size} elementi selezionati
+          </div>
+        )}
+        {isDragging && draggedItem && dragState && (
+          <div className="text-[10px] text-blue-400 mt-1">
+            {(() => {
+              const draggedItemData = items.find(i => i.id === draggedItem);
+              const isValidPosition = draggedItemData && isValidTrack(dragState.currentTrack, draggedItemData.mediaFile.type);
+              return isValidPosition ? '✓ Posizione valida' : '⚠️ Posizione non valida';
+            })()}
           </div>
         )}
       </div>
