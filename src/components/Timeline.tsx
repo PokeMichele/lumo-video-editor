@@ -3,7 +3,7 @@ import { Card } from "@/components/ui/card";
 import { TimelineItem } from "./VideoEditor";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
-import { Copy, Scissors, Trash2, Plus, Minus } from "lucide-react";
+import { Copy, Scissors, Trash2, Plus, Minus, Clipboard } from "lucide-react";
 
 interface TimelineProps {
   items: TimelineItem[];
@@ -54,6 +54,7 @@ export const Timeline = ({
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; itemId?: string; selectedItems?: string[] } | null>(null);
   const [copiedItem, setCopiedItem] = useState<TimelineItem | null>(null);
   const [copiedItems, setCopiedItems] = useState<TimelineItem[]>([]); // Per copia multipla
+  const [cutItems, setCutItems] = useState<TimelineItem[]>([]); // Per il cut
   const [resizing, setResizing] = useState<{ itemId: string; edge: 'left' | 'right' } | null>(null);
   const [scrollLeft, setScrollLeft] = useState(0);
   const [scrollTop, setScrollTop] = useState(0); // Aggiunto per scroll verticale
@@ -92,6 +93,124 @@ export const Timeline = ({
   // Limiti per lo zoom
   const minScale = 10;
   const maxScale = 200;
+
+  // Scorciatoie da tastiera
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Solo se non siamo in un input o textarea
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      if (e.ctrlKey || e.metaKey) {
+        switch (e.key.toLowerCase()) {
+          case 'c':
+            e.preventDefault();
+            handleCopyKeyboard();
+            break;
+          case 'x':
+            e.preventDefault();
+            handleCutKeyboard();
+            break;
+          case 'v':
+            e.preventDefault();
+            handlePasteKeyboard();
+            break;
+        }
+      } else if (e.key === 'Delete') {
+        e.preventDefault();
+        handleDeleteKeyboard();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedItems, items, currentTime]);
+
+  // Funzioni per le scorciatoie da tastiera
+  const handleCopyKeyboard = () => {
+    if (selectedItems.size > 1) {
+      const itemsToCopy = items.filter(i => selectedItems.has(i.id));
+      setCopiedItems(itemsToCopy.map(i => ({ ...i, id: `${i.id}_copy` })));
+      setCopiedItem(null);
+      setCutItems([]);
+    } else if (selectedItems.size === 1) {
+      const itemId = Array.from(selectedItems)[0];
+      const item = items.find(i => i.id === itemId);
+      if (item) {
+        setCopiedItem({ ...item, id: `${item.id}_copy` });
+        setCopiedItems([]);
+        setCutItems([]);
+      }
+    }
+  };
+
+  const handleCutKeyboard = () => {
+    if (selectedItems.size > 0) {
+      const itemsToCut = items.filter(i => selectedItems.has(i.id));
+      setCutItems(itemsToCut.map(i => ({ ...i })));
+      setCopiedItems([]);
+      setCopiedItem(null);
+      
+      // Rimuovi gli elementi dalla timeline
+      const newItems = items.filter(item => !selectedItems.has(item.id));
+      onItemsChangeWithHistory(newItems);
+      setSelectedItems(new Set());
+    }
+  };
+
+  const handlePasteKeyboard = () => {
+    // Trova la traccia più appropriata in base al tipo di contenuto
+    const getTargetTrack = (mediaType: string) => {
+      if (mediaType === 'video' || mediaType === 'image') {
+        return tracks.find(t => t.type === 'video')?.index || 0;
+      } else if (mediaType === 'audio') {
+        return tracks.find(t => t.type === 'audio')?.index || 1;
+      }
+      return 0;
+    };
+
+    if (cutItems.length > 0) {
+      // Incolla elementi tagliati
+      const newItems = cutItems.map(cutItem => ({
+        ...cutItem,
+        id: `${cutItem.id}_paste_${Date.now()}_${Math.random()}`,
+        track: getTargetTrack(cutItem.mediaFile.type),
+        startTime: currentTime,
+        mediaStartOffset: cutItem.mediaStartOffset || 0
+      }));
+      onItemsChangeWithHistory([...items, ...newItems]);
+      setCutItems([]);
+    } else if (copiedItems.length > 0) {
+      // Incolla elementi copiati
+      const newItems = copiedItems.map(copiedItem => ({
+        ...copiedItem,
+        id: `${copiedItem.id}_paste_${Date.now()}_${Math.random()}`,
+        track: getTargetTrack(copiedItem.mediaFile.type),
+        startTime: currentTime,
+        mediaStartOffset: copiedItem.mediaStartOffset || 0
+      }));
+      onItemsChangeWithHistory([...items, ...newItems]);
+    } else if (copiedItem) {
+      // Incolla elemento singolo copiato
+      const newItem = {
+        ...copiedItem,
+        id: `${copiedItem.id}_paste_${Date.now()}`,
+        track: getTargetTrack(copiedItem.mediaFile.type),
+        startTime: currentTime,
+        mediaStartOffset: copiedItem.mediaStartOffset || 0
+      };
+      onItemsChangeWithHistory([...items, newItem]);
+    }
+  };
+
+  const handleDeleteKeyboard = () => {
+    if (selectedItems.size > 0) {
+      const newItems = items.filter(item => !selectedItems.has(item.id));
+      onItemsChangeWithHistory(newItems);
+      setSelectedItems(new Set());
+    }
+  };
 
   // Zoom functionality con Ctrl+Scroll
   useEffect(() => {
@@ -478,30 +597,67 @@ export const Timeline = ({
       const itemsToCopy = items.filter(i => selectedItems.has(i.id));
       setCopiedItems(itemsToCopy.map(i => ({ ...i, id: `${i.id}_copy` })));
       setCopiedItem(null);
+      setCutItems([]);
     } else if (item) {
       // Copia singola
       setCopiedItem({ ...item, id: `${item.id}_copy` });
       setCopiedItems([]);
+      setCutItems([]);
+    }
+    setContextMenu(null);
+  };
+
+  const handleCut = (item?: TimelineItem) => {
+    if (selectedItems.size > 1) {
+      // Taglia multiplo
+      const itemsToCut = items.filter(i => selectedItems.has(i.id));
+      setCutItems(itemsToCut.map(i => ({ ...i })));
+      setCopiedItems([]);
+      setCopiedItem(null);
+      
+      // Rimuovi gli elementi dalla timeline
+      const newItems = items.filter(item => !selectedItems.has(item.id));
+      onItemsChangeWithHistory(newItems);
+      setSelectedItems(new Set());
+    } else if (item) {
+      // Taglia singolo
+      setCutItems([{ ...item }]);
+      setCopiedItems([]);
+      setCopiedItem(null);
+      
+      // Rimuovi l'elemento dalla timeline
+      onItemsChangeWithHistory(items.filter(i => i.id !== item.id));
     }
     setContextMenu(null);
   };
 
   const handlePaste = (track: number) => {
-    if (copiedItems.length > 0) {
-      // Incolla multiplo
+    if (cutItems.length > 0) {
+      // Incolla elementi tagliati
+      const newItems = cutItems.map(cutItem => ({
+        ...cutItem,
+        id: `${cutItem.id}_paste_${Date.now()}_${Math.random()}`,
+        track: isValidTrack(track, cutItem.mediaFile.type) ? track : cutItem.track,
+        startTime: currentTime,
+        mediaStartOffset: cutItem.mediaStartOffset || 0
+      }));
+      onItemsChangeWithHistory([...items, ...newItems]);
+      setCutItems([]);
+    } else if (copiedItems.length > 0) {
+      // Incolla elementi copiati
       const newItems = copiedItems.map(copiedItem => ({
         ...copiedItem,
-        id: `${copiedItem.id}_${Date.now()}_${Math.random()}`,
+        id: `${copiedItem.id}_paste_${Date.now()}_${Math.random()}`,
         track: isValidTrack(track, copiedItem.mediaFile.type) ? track : copiedItem.track,
         startTime: currentTime,
         mediaStartOffset: copiedItem.mediaStartOffset || 0
       }));
       onItemsChangeWithHistory([...items, ...newItems]);
     } else if (copiedItem) {
-      // Incolla singolo
+      // Incolla elemento singolo copiato
       const newItem = {
         ...copiedItem,
-        id: `${copiedItem.id}_${Date.now()}`,
+        id: `${copiedItem.id}_paste_${Date.now()}`,
         track,
         startTime: currentTime,
         mediaStartOffset: copiedItem.mediaStartOffset || 0
@@ -950,6 +1106,7 @@ export const Timeline = ({
     const isDraggedItem = draggedItem === item.id;
     const isSelected = selectedItems.has(item.id);
     const isPartOfDrag = isDragging && dragState?.draggedItems.some(di => di.id === item.id);
+    const isCutItem = cutItems.some(cutItem => cutItem.id === item.id); // Evidenzia elementi tagliati
     
     // Verifica se l'elemento è in una posizione non valida durante il drag
     const isInvalidPosition = isPartOfDrag && !isValidTrack(track, item.mediaFile.type);
@@ -973,11 +1130,12 @@ export const Timeline = ({
           isPartOfDrag ? 'z-25 opacity-75 shadow-md' : 'z-10'
         } ${
           isSelected ? 'border-yellow-400 ring-2 ring-yellow-400/50' : 
-          isInvalidPosition ? 'border-red-500 ring-2 ring-red-500/50' : 'border-white/20'
+          isInvalidPosition ? 'border-red-500 ring-2 ring-red-500/50' : 
+          isCutItem ? 'border-orange-400 ring-2 ring-orange-400/50' : 'border-white/20'
         } ${
           isPartOfDrag && !isDraggedItem ? 'ring-2 ring-blue-400/50' : ''
         } ${
-          isInvalidPosition ? 'opacity-60' : ''
+          isInvalidPosition ? 'opacity-60' : isCutItem ? 'opacity-70' : ''
         } ${
           isInvalidPosition ? 'cursor-not-allowed' : 'cursor-move'
         }`}
@@ -1039,6 +1197,12 @@ export const Timeline = ({
               !
             </div>
           )}
+          {/* Indicatore di elemento tagliato */}
+          {isCutItem && !isPartOfDrag && (
+            <div className="absolute -top-1 -right-1 bg-orange-500 text-white text-[8px] rounded-full w-3 h-3 flex items-center justify-center">
+              ✂
+            </div>
+          )}
         </div>
       </div>
     );
@@ -1071,6 +1235,9 @@ export const Timeline = ({
     items.filter(item => item.track === track.index)
   );
 
+  // Verifica se c'è contenuto da incollare
+  const hasContentToPaste = copiedItem !== null || copiedItems.length > 0 || cutItems.length > 0;
+
   return (
     <div className="h-full flex flex-col bg-timeline-bg">
       {/* Zoom Indicator */}
@@ -1082,6 +1249,11 @@ export const Timeline = ({
             {selectedItems.size} elementi selezionati
           </div>
         )}
+        {cutItems.length > 0 && (
+          <div className="text-[10px] text-orange-400 mt-1">
+            {cutItems.length} elementi tagliati
+          </div>
+        )}
         {isDragging && draggedItem && dragState && (
           <div className="text-[10px] text-blue-400 mt-1">
             {(() => {
@@ -1091,6 +1263,10 @@ export const Timeline = ({
             })()}
           </div>
         )}
+        {/* Indicatori scorciatoie */}
+        <div className="text-[9px] text-gray-500 mt-1 border-t border-gray-600 pt-1">
+          Ctrl+C/X/V | Canc
+        </div>
       </div>
 
       {/* Timeline Header with Time Markers */}
@@ -1149,12 +1325,8 @@ export const Timeline = ({
                   style={{ top: `${track.index * 60 + 8}px` }}
                   onContextMenu={(e) => {
                     e.preventDefault();
-                    if (copiedItems.length > 0 || copiedItem) {
-                      if (copiedItems.length > 0) {
-                        handlePaste(track.index);
-                      } else if (copiedItem && isValidTrack(track.index, copiedItem.mediaFile.type)) {
-                        handlePaste(track.index);
-                      }
+                    if (hasContentToPaste) {
+                      handlePaste(track.index);
                     }
                   }}
                 >
@@ -1284,7 +1456,56 @@ export const Timeline = ({
           >
             <Copy className="w-3 h-3 mr-2" />
             {contextMenu.selectedItems ? `Copy ${contextMenu.selectedItems.length} items` : 'Copy'}
+            <span className="ml-auto text-xs text-muted-foreground">Ctrl+C</span>
           </Button>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start px-3 py-1.5 h-auto text-xs"
+            onClick={() => {
+              if (contextMenu.selectedItems && contextMenu.selectedItems.length > 1) {
+                // Taglia multiplo
+                handleCut();
+              } else if (contextMenu.itemId) {
+                // Taglia singolo
+                const item = items.find(i => i.id === contextMenu.itemId);
+                if (item) handleCut(item);
+              }
+            }}
+          >
+            <Scissors className="w-3 h-3 mr-2" />
+            {contextMenu.selectedItems ? `Cut ${contextMenu.selectedItems.length} items` : 'Cut'}
+            <span className="ml-auto text-xs text-muted-foreground">Ctrl+X</span>
+          </Button>
+
+          {hasContentToPaste && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start px-3 py-1.5 h-auto text-xs"
+              onClick={() => {
+                // Trova la traccia più adatta per il paste
+                const getDefaultTrack = () => {
+                  if (cutItems.length > 0) {
+                    return cutItems[0].track;
+                  } else if (copiedItems.length > 0) {
+                    return copiedItems[0].track;
+                  } else if (copiedItem) {
+                    return copiedItem.track;
+                  }
+                  return 0;
+                };
+                
+                handlePaste(getDefaultTrack());
+                setContextMenu(null);
+              }}
+            >
+              <Clipboard className="w-3 h-3 mr-2" />
+              Paste
+              <span className="ml-auto text-xs text-muted-foreground">Ctrl+V</span>
+            </Button>
+          )}
           
           {/* Split solo per elemento singolo */}
           {contextMenu.itemId && !contextMenu.selectedItems && (
@@ -1316,6 +1537,7 @@ export const Timeline = ({
           >
             <Trash2 className="w-3 h-3 mr-2" />
             {contextMenu.selectedItems ? `Delete ${contextMenu.selectedItems.length} items` : 'Delete'}
+            <span className="ml-auto text-xs text-muted-foreground">Del</span>
           </Button>
         </div>
       )}
