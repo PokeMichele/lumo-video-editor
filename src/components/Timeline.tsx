@@ -12,9 +12,11 @@ interface TimelineProps {
   onItemsChange: (items: TimelineItem[]) => void;
   onItemsChangeWithHistory: (items: TimelineItem[]) => void;
   totalDuration: number;
+  tracks: Track[];
+  onTracksChange: (tracks: Track[]) => void;
 }
 
-interface Track {
+export interface Track {
   id: string;
   type: 'video' | 'audio';
   index: number;
@@ -39,7 +41,9 @@ export const Timeline = ({
   onTimeChange,
   onItemsChange,
   onItemsChangeWithHistory,
-  totalDuration
+  totalDuration,
+  tracks,
+  onTracksChange
 }: TimelineProps) => {
   const timelineHeaderContentRef = useRef<HTMLDivElement>(null);
   const timelineContentRef = useRef<HTMLDivElement>(null);
@@ -59,13 +63,6 @@ export const Timeline = ({
   const [isSelecting, setIsSelecting] = useState(false);
   const [selectionStart, setSelectionStart] = useState<{ x: number; y: number } | null>(null);
   const [selectionEnd, setSelectionEnd] = useState<{ x: number; y: number } | null>(null);
-  
-  // Sistema di tracce dinamiche
-  const [tracks, setTracks] = useState<Track[]>([
-    { id: 'video-0', type: 'video', index: 0, label: 'Video 1' },
-    { id: 'audio-0', type: 'audio', index: 1, label: 'Audio 1' },
-    { id: 'audio-1', type: 'audio', index: 2, label: 'Audio 2' }
-  ]);
   
   // Stati per il magnetic snap
   const [snapThreshold] = useState(15); // pixels per il snap
@@ -391,9 +388,9 @@ export const Timeline = ({
         }
       });
     
-    setTracks(finalTracks);
+    onTracksChange(finalTracks);
     onItemsChangeWithHistory(updatedItems);
-  }, [tracks, items, onItemsChangeWithHistory]);
+  }, [tracks, items, onItemsChangeWithHistory, onTracksChange]);
 
   // Rimuovi traccia
   const removeTrack = useCallback((trackToRemove: Track) => {
@@ -442,9 +439,9 @@ export const Timeline = ({
         }
       });
     
-    setTracks(finalTracks);
+    onTracksChange(finalTracks);
     onItemsChangeWithHistory(updatedItems);
-  }, [tracks, items, onItemsChangeWithHistory]);
+  }, [tracks, items, onItemsChangeWithHistory, onTracksChange]);
 
   // Verifica se una traccia può essere rimossa
   const canRemoveTrack = useCallback((track: Track) => {

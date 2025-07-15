@@ -3,12 +3,14 @@ import { Upload, File, Music, Video, Image as ImageIcon, Undo2, Redo2 } from "lu
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { MediaFile, TimelineItem } from "./VideoEditor";
+import { Track } from "./Timeline";
 
 interface FilesBrowserProps {
   files: MediaFile[];
   onFilesAdded: (files: MediaFile[]) => void;
   onItemAddedToTimeline: (item: TimelineItem) => void;
   timelineItems: TimelineItem[];
+  tracks: Track[];
   onUndo: () => void;
   onRedo: () => void;
   canUndo: boolean;
@@ -22,6 +24,7 @@ export const FilesBrowser = ({
   onFilesAdded,
   onItemAddedToTimeline,
   timelineItems,
+  tracks,
   onUndo,
   onRedo,
   canUndo,
@@ -107,26 +110,39 @@ export const FilesBrowser = ({
     });
   };
 
-  // Calcola la posizione ottimale per un nuovo elemento nella timeline
-  const calculateOptimalStartTime = (mediaFile: MediaFile): number => {
-    // Determina la traccia appropriata basata sul tipo di media
-    let targetTrack = 0;
-    if (mediaFile.type === 'video' || mediaFile.type === 'image') {
-      targetTrack = 0; // Video track
-    } else if (mediaFile.type === 'audio') {
-      // Trova la prima traccia audio disponibile (1 o 2)
-      const track1Items = timelineItems.filter(item => item.track === 1);
-      const track2Items = timelineItems.filter(item => item.track === 2);
-
-      // Usa la traccia con meno elementi, o la 1 se sono uguali
-      targetTrack = track1Items.length <= track2Items.length ? 1 : 2;
+  // Trova la prima traccia disponibile del tipo specificato
+  const findFirstAvailableTrack = (mediaType: 'video' | 'audio' | 'image'): Track | null => {
+    const targetType = (mediaType === 'video' || mediaType === 'image') ? 'video' : 'audio';
+    
+    // Trova tutte le tracce del tipo corretto, ordinate per indice
+    const relevantTracks = tracks
+      .filter(track => track.type === targetType)
+      .sort((a, b) => a.index - b.index);
+    
+    if (relevantTracks.length === 0) {
+      return null; // Nessuna traccia del tipo corretto trovata
     }
+    
+    // Restituisce la prima traccia disponibile
+    return relevantTracks[0];
+  };
 
+  // Calcola la posizione ottimale per un nuovo elemento nella timeline
+  const calculateOptimalStartTime = (mediaFile: MediaFile): { startTime: number; track: number } => {
+    const availableTrack = findFirstAvailableTrack(mediaFile.type);
+    
+    if (!availableTrack) {
+      // Fallback: usa la traccia 0 se non ci sono tracce appropriate
+      return { startTime: 0, track: 0 };
+    }
+    
+    const targetTrack = availableTrack.index;
+    
     // Trova tutti gli elementi nella traccia target
     const itemsInTrack = timelineItems.filter(item => item.track === targetTrack);
 
     if (itemsInTrack.length === 0) {
-      return 0; // Se la traccia è vuota, inizia da 0
+      return { startTime: 0, track: targetTrack }; // Se la traccia è vuota, inizia da 0
     }
 
     // Trova l'ultimo elemento nella traccia
@@ -137,22 +153,14 @@ export const FilesBrowser = ({
     });
 
     // Restituisce il tempo di fine dell'ultimo elemento
-    return lastItem.startTime + lastItem.duration;
+    return { 
+      startTime: lastItem.startTime + lastItem.duration, 
+      track: targetTrack 
+    };
   };
 
   const handleAddToTimeline = (file: MediaFile) => {
-    const startTime = calculateOptimalStartTime(file);
-
-    // Determina la traccia appropriata
-    let track = 0;
-    if (file.type === 'video' || file.type === 'image') {
-      track = 0; // Video track
-    } else if (file.type === 'audio') {
-      // Trova la prima traccia audio disponibile (1 o 2)
-      const track1Items = timelineItems.filter(item => item.track === 1);
-      const track2Items = timelineItems.filter(item => item.track === 2);
-      track = track1Items.length <= track2Items.length ? 1 : 2;
-    }
+    const { startTime, track } = calculateOptimalStartTime(file);
 
     const newItem: TimelineItem = {
       id: `timeline-${Date.now()}-${Math.random()}`,
@@ -164,6 +172,12 @@ export const FilesBrowser = ({
     };
 
     onItemAddedToTimeline(newItem);
+  };
+
+  // Funzione per ottenere il nome della traccia dove verrà aggiunto il file
+  const getTargetTrackName = (file: MediaFile): string => {
+    const availableTrack = findFirstAvailableTrack(file.type);
+    return availableTrack ? availableTrack.label : 'Unknown Track';
   };
 
   return (
@@ -268,7 +282,7 @@ export const FilesBrowser = ({
                         {file.name}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {Math.round(file.duration)}s
+                        {Math.round(file.duration)}s → {getTargetTrackName(file)}
                       </p>
                     </div>
                   </div>
@@ -277,6 +291,12 @@ export const FilesBrowser = ({
                     variant="secondary"
                     onClick={() => handleAddToTimeline(file)}
                     className="ml-2 flex-shrink-0"
+                    disabled={!findFirstAvailableTrack(file.type)}
+                    title={
+                      findFirstAvailableTrack(file.type) 
+                        ? `Add to ${getTargetTrackName(file)}` 
+                        : `No suitable track available for ${file.type}`
+                    }
                   >
                     Add
                   </Button>

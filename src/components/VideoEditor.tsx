@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { FilesBrowser } from "./FilesBrowser";
 import { CompositeVideoPlayer } from "./CompositeVideoPlayer";
-import { Timeline } from "./Timeline";
+import { Timeline, Track } from "./Timeline";
 import { Button } from "@/components/ui/button";
 import { Download } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -36,6 +36,14 @@ export const VideoEditor = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [history, setHistory] = useState<HistoryState[]>([{ timelineItems: [], currentTime: 0 }]);
   const [historyIndex, setHistoryIndex] = useState(0);
+  
+  // Gestione tracce dinamiche
+  const [tracks, setTracks] = useState<Track[]>([
+    { id: 'video-0', type: 'video', index: 0, label: 'Video 1' },
+    { id: 'audio-0', type: 'audio', index: 1, label: 'Audio 1' },
+    { id: 'audio-1', type: 'audio', index: 2, label: 'Audio 2' }
+  ]);
+  
   const { toast } = useToast();
 
   // Keyboard shortcuts for undo/redo
@@ -134,6 +142,10 @@ export const VideoEditor = () => {
     saveToHistory(items);
   };
 
+  const handleTracksChange = (newTracks: Track[]) => {
+    setTracks(newTracks);
+  };
+
   const handleExport = () => {
     toast({
       title: "Export Started",
@@ -161,6 +173,7 @@ export const VideoEditor = () => {
             onFilesAdded={handleFilesAdded}
             onItemAddedToTimeline={handleItemAddedToTimeline}
             timelineItems={timelineItems}
+            tracks={tracks}
             onUndo={handleUndo}
             onRedo={handleRedo}
             canUndo={historyIndex > 0}
@@ -207,11 +220,12 @@ export const VideoEditor = () => {
                 <Button variant="outline" size="sm">Audio Mix</Button>
               </div>
 
-              {/* Informazioni progetto - senza debug history */}
+              {/* Informazioni progetto */}
               <div className="mt-6 text-xs text-muted-foreground/70">
                 <p>Timeline Items: {timelineItems.length}</p>
                 <p>Total Duration: {Math.round(totalDuration)}s</p>
                 <p>Current Time: {Math.round(currentTime)}s</p>
+                <p>Tracks: {tracks.filter(t => t.type === 'video').length} Video, {tracks.filter(t => t.type === 'audio').length} Audio</p>
               </div>
             </div>
           </div>
@@ -227,6 +241,8 @@ export const VideoEditor = () => {
           onItemsChange={handleTimelineItemsChange}
           onItemsChangeWithHistory={handleTimelineItemsChangeWithHistory}
           totalDuration={totalDuration}
+          tracks={tracks}
+          onTracksChange={handleTracksChange}
         />
       </div>
     </div>
