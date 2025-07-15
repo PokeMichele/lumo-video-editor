@@ -1052,30 +1052,40 @@ export const Timeline = ({
       <div className="flex-1 relative overflow-hidden">
         {/* Track Labels */}
         <div className="absolute left-0 top-0 w-20 h-full bg-secondary/50 border-r border-border z-20">
-          {['Video', 'Audio 1', 'Audio 2'].map((label, index) => (
-            <div
-              key={label}
-              className="absolute w-full h-14 flex items-center justify-center text-xs font-medium text-muted-foreground border-b border-border/30"
-              style={{ top: `${index * 60 + 8}px` }}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                if (copiedItems.length > 0 || copiedItem) {
-                  if (copiedItems.length > 0) {
-                    handlePaste(index);
-                  } else if (copiedItem && isValidTrack(index, copiedItem.mediaFile.type)) {
-                    handlePaste(index);
+          {tracks.map((track, index) => (
+            <div key={track.id} className="relative">
+              <div
+                className="absolute w-full h-14 flex flex-col items-center justify-center text-xs font-medium text-muted-foreground border-b border-border/30"
+                style={{ top: `${track.index * 60 + 8}px` }}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  if (copiedItems.length > 0 || copiedItem) {
+                    if (copiedItems.length > 0) {
+                      handlePaste(track.index);
+                    } else if (copiedItem && isValidTrack(track.index, copiedItem.mediaFile.type)) {
+                      handlePaste(track.index);
+                    }
                   }
-                }
-              }}
-            >
-              {label}
+                }}
+              >
+                <span className="text-[10px] leading-tight">{track.label}</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-4 h-4 p-0 mt-1 text-xs hover:bg-accent/50 rounded-sm"
+                  onClick={() => addTrack(track.type, track.index)}
+                  title={`Add new ${track.type} track`}
+                >
+                  +
+                </Button>
+              </div>
             </div>
           ))}
         </div>
 
         {/* Timeline Content */}
         <div
-          className="ml-20 relative h-full overflow-x-auto overflow-y-hidden"
+          className="ml-20 relative h-full overflow-x-auto overflow-y-auto"
           onScroll={handleTimelineContentScroll}
           ref={timelineContentRef}
           onMouseDown={handleTimelineMouseDown}
@@ -1085,21 +1095,21 @@ export const Timeline = ({
           }}
         >
           <div
-            className="relative h-48"
-            style={{ width: `${timelineWidth}px` }}
+            className="relative"
+            style={{ width: `${timelineWidth}px`, height: `${timelineHeight}px` }}
           >
             {/* Track Backgrounds */}
-            {[0, 1, 2].map(track => (
+            {tracks.map(track => (
               <div
-                key={track}
+                key={track.id}
                 className="absolute w-full h-14 border-b border-border/30"
-                style={{ top: `${track * 60 + 8}px` }}
+                style={{ top: `${track.index * 60 + 8}px` }}
               />
             ))}
 
             {/* Timeline Items */}
             {trackItems.map((trackItems, trackIndex) =>
-              trackItems.map(item => renderTimelineItem(item, trackIndex))
+              trackItems.map(item => renderTimelineItem(item, tracks[trackIndex].index))
             )}
 
             {/* Grid Lines */}
@@ -1109,8 +1119,12 @@ export const Timeline = ({
                 return (
                   <div
                     key={i}
-                    className="absolute top-0 bottom-0 w-px bg-border/30"
-                    style={{ left: `${i * interval * scale}px` }}
+                    className="absolute w-px bg-border/30"
+                    style={{ 
+                      left: `${i * interval * scale}px`,
+                      top: '0px',
+                      height: `${timelineHeight}px`
+                    }}
                   />
                 );
               })}
@@ -1120,8 +1134,12 @@ export const Timeline = ({
             {activeSnapLines.map((snapTime, index) => (
               <div
                 key={`snap-${index}`}
-                className="absolute top-0 bottom-0 w-0.5 bg-yellow-400 pointer-events-none z-40 shadow-lg"
-                style={{ left: `${snapTime * scale}px` }}
+                className="absolute w-0.5 bg-yellow-400 pointer-events-none z-40 shadow-lg"
+                style={{ 
+                  left: `${snapTime * scale}px`,
+                  top: '0px',
+                  height: `${timelineHeight}px`
+                }}
               />
             ))}
 
