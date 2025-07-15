@@ -281,7 +281,7 @@ export const Timeline = ({
     });
   }, [items]);
 
-  // FIXED: Logica di snap completamente semplificata
+  // FIXED: Logica di snap drasticamente semplificata - priorità al movimento libero
   const findSnapPoint = useCallback((currentTime: number, snapPoints: { time: number; type: 'start' | 'end' | 'timeline-start' }[], draggedItemDuration: number, targetTrack: number, draggedItemId: string): { 
     time: number; 
     snapped: boolean; 
@@ -290,69 +290,39 @@ export const Timeline = ({
   } => {
     const snapThresholdTime = snapThreshold / scale;
     
-    // Prima controlla se la posizione corrente è valida
-    const currentIsValid = currentTime >= 0 && !wouldCauseOverlap(currentTime, draggedItemDuration, targetTrack, draggedItemId);
-    
-    // Cerca il miglior snap point
-    let bestSnap: { time: number; snapLine: number; distance: number } | null = null;
-    
-    for (const snapPoint of snapPoints) {
-      // Snap all'inizio dell'elemento
-      const startDistance = Math.abs(currentTime - snapPoint.time);
-      if (startDistance <= snapThresholdTime) {
-        const snapTime = snapPoint.time;
-        if (snapTime >= 0 && !wouldCauseOverlap(snapTime, draggedItemDuration, targetTrack, draggedItemId)) {
-          if (!bestSnap || startDistance < bestSnap.distance) {
-            bestSnap = { time: snapTime, snapLine: snapPoint.time, distance: startDistance };
+    // PRIMA COSA: Se la posizione corrente è valida, usala SEMPRE
+    if (currentTime >= 0 && !wouldCauseOverlap(currentTime, draggedItemDuration, targetTrack, draggedItemId)) {
+      // Controlla se c'è un snap point molto vicino (solo per l'assistenza visiva)
+      for (const snapPoint of snapPoints) {
+        if (Math.abs(currentTime - snapPoint.time) <= snapThresholdTime) {
+          if (snapPoint.time >= 0 && !wouldCauseOverlap(snapPoint.time, draggedItemDuration, targetTrack, draggedItemId)) {
+            return {
+              time: snapPoint.time,
+              snapped: true,
+              snapLine: snapPoint.time,
+              showSnapLine: true
+            };
+          }
+        }
+        
+        if (Math.abs((currentTime + draggedItemDuration) - snapPoint.time) <= snapThresholdTime) {
+          const snapTime = snapPoint.time - draggedItemDuration;
+          if (snapTime >= 0 && !wouldCauseOverlap(snapTime, draggedItemDuration, targetTrack, draggedItemId)) {
+            return {
+              time: snapTime,
+              snapped: true,
+              snapLine: snapPoint.time,
+              showSnapLine: true
+            };
           }
         }
       }
       
-      // Snap alla fine dell'elemento
-      const endDistance = Math.abs((currentTime + draggedItemDuration) - snapPoint.time);
-      if (endDistance <= snapThresholdTime) {
-        const snapTime = snapPoint.time - draggedItemDuration;
-        if (snapTime >= 0 && !wouldCauseOverlap(snapTime, draggedItemDuration, targetTrack, draggedItemId)) {
-          if (!bestSnap || endDistance < bestSnap.distance) {
-            bestSnap = { time: snapTime, snapLine: snapPoint.time, distance: endDistance };
-          }
-        }
-      }
-    }
-    
-    // Se c'è un buon snap, usalo
-    if (bestSnap) {
-      return {
-        time: bestSnap.time,
-        snapped: true,
-        snapLine: bestSnap.snapLine,
-        showSnapLine: true
-      };
-    }
-    
-    // Se la posizione corrente è valida, usala
-    if (currentIsValid) {
+      // Nessun snap ma posizione valida - usa la posizione corrente
       return { time: currentTime, snapped: false, showSnapLine: false };
     }
     
-    // Altrimenti, trova la posizione valida più vicina
-    // Cerca a destra
-    for (let offset = 0.1; offset <= 10; offset += 0.1) {
-      const testTime = currentTime + offset;
-      if (testTime >= 0 && !wouldCauseOverlap(testTime, draggedItemDuration, targetTrack, draggedItemId)) {
-        return { time: testTime, snapped: false, showSnapLine: false };
-      }
-    }
-    
-    // Cerca a sinistra
-    for (let offset = 0.1; offset <= 10; offset += 0.1) {
-      const testTime = currentTime - offset;
-      if (testTime >= 0 && !wouldCauseOverlap(testTime, draggedItemDuration, targetTrack, draggedItemId)) {
-        return { time: testTime, snapped: false, showSnapLine: false };
-      }
-    }
-    
-    // Come ultima risorsa, torna alla posizione corrente
+    // SOLO se la posizione corrente non è valida, cerca una alternativa
     return { time: Math.max(0, currentTime), snapped: false, showSnapLine: false };
   }, [scale, snapThreshold, wouldCauseOverlap]);
 
@@ -581,28 +551,9 @@ export const Timeline = ({
             dragStateRef.current.startTrack = newTrack;
           }
 
-          // FIXED: Usa la nuova logica di snap migliorata - ma consenti sempre il movimento base
+          // FIXED: Usa la logica di snap semplificata - niente fallback complessi
           const snapResult = findSnapPoint(rawTime, snapPoints, dragStateRef.current.draggedItemDuration, newTrack, draggedItem);
-          let finalTime = snapResult.time;
-          
-          // FALLBACK: Se il snap fallisce, usa almeno la posizione raw se è valida
-          if (finalTime === rawTime && wouldCauseOverlap(finalTime, draggedItemData.duration, newTrack, draggedItem)) {
-            // Prova a trovare la posizione valida più vicina manualmente
-            finalTime = rawTime;
-            for (let offset = 0.1; offset <= 5; offset += 0.1) {
-              const testTimeRight = rawTime + offset;
-              const testTimeLeft = rawTime - offset;
-              
-              if (testTimeRight >= 0 && !wouldCauseOverlap(testTimeRight, draggedItemData.duration, newTrack, draggedItem)) {
-                finalTime = testTimeRight;
-                break;
-              }
-              if (testTimeLeft >= 0 && !wouldCauseOverlap(testTimeLeft, draggedItemData.duration, newTrack, draggedItem)) {
-                finalTime = testTimeLeft;
-                break;
-              }
-            }
-          }
+          const finalTime = snapResult.time;
 
           // Update snap lines
           if (snapResult.showSnapLine && snapResult.snapLine !== undefined) {
@@ -613,10 +564,6 @@ export const Timeline = ({
 
           // Aggiorna il drag preview con informazione di validità
           const isValidPosition = !wouldCauseOverlap(finalTime, draggedItemData.duration, newTrack, draggedItem);
-          
-          if (!isValidPosition) {
-            console.log(`⚠️  Position ${finalTime}s on track ${newTrack} would cause overlap`);
-          }
           
           const newDragPreview = {
             itemId: draggedItem,
@@ -648,7 +595,7 @@ export const Timeline = ({
       console.log('=== Mouse Up - Final Drop ===');
       let finalItems = [...items];
       
-      // FIXED: Applica le modifiche finali dal drag preview
+      // FIXED: Applica SEMPRE le modifiche dal drag preview senza controlli aggiuntivi
       if (isDragging && draggedItem && dragPreview) {
         console.log(`Applying final position: ${dragPreview.startTime}s on track ${dragPreview.track}`);
         
@@ -658,14 +605,7 @@ export const Timeline = ({
             : item
         );
         
-        // Verifica che il movimento finale sia valido
-        const draggedItemFinal = finalItems.find(i => i.id === draggedItem);
-        if (draggedItemFinal && wouldCauseOverlap(draggedItemFinal.startTime, draggedItemFinal.duration, draggedItemFinal.track, draggedItemFinal.id)) {
-          console.warn('❌ Final position would cause overlap, reverting to initial position');
-          finalItems = initialItemsForDrag || items;
-        } else {
-          console.log('✅ Final position is valid');
-        }
+        console.log('✅ Final position applied without restrictions');
       }
 
       // Applica sempre le modifiche
@@ -723,9 +663,9 @@ export const Timeline = ({
     const topPosition = displayTrack * 60 + 8;
 
     const trackColors = {
-      video: 'bg-video-track',
-      audio: 'bg-audio-track',
-      image: 'bg-video-track'
+      video: 'bg-blue-600',    // Azzurro per video
+      audio: 'bg-green-600',   // Verde per audio
+      image: 'bg-purple-600'   // Viola per immagini
     };
 
     // NUOVO: Indica visivamente se la posizione durante il drag è valida
@@ -752,15 +692,19 @@ export const Timeline = ({
           setContextMenu({ x: e.clientX, y: e.clientY, itemId: item.id });
         }}
       >
-        {/* Resize handles */}
-        <div
-          className="absolute left-0 top-0 w-1 h-full cursor-ew-resize opacity-0 group-hover:opacity-100 bg-white/50"
-          onMouseDown={(e) => handleMouseDown(e, item, 'left')}
-        />
-        <div
-          className="absolute right-0 top-0 w-1 h-full cursor-ew-resize opacity-0 group-hover:opacity-100 bg-white/50"
-          onMouseDown={(e) => handleMouseDown(e, item, 'right')}
-        />
+        {/* Resize handles - SOLO per immagini */}
+        {item.mediaFile.type === 'image' && (
+          <>
+            <div
+              className="absolute left-0 top-0 w-1 h-full cursor-ew-resize opacity-0 group-hover:opacity-100 bg-white/50"
+              onMouseDown={(e) => handleMouseDown(e, item, 'left')}
+            />
+            <div
+              className="absolute right-0 top-0 w-1 h-full cursor-ew-resize opacity-0 group-hover:opacity-100 bg-white/50"
+              onMouseDown={(e) => handleMouseDown(e, item, 'right')}
+            />
+          </>
+        )}
 
         <div className="p-2 h-full flex items-center justify-between text-white text-xs overflow-hidden select-none">
           <span className="truncate flex-1 select-none">{item.mediaFile.name}</span>
