@@ -45,11 +45,13 @@ export const Timeline = ({
   const [resizing, setResizing] = useState<{ itemId: string; edge: 'left' | 'right' } | null>(null);
   const [scrollLeft, setScrollLeft] = useState(0);
   const [initialItemsForDrag, setInitialItemsForDrag] = useState<TimelineItem[] | null>(null);
-  const [snapThreshold] = useState(60); // FIXED: Same as visual threshold
-  const [visualSnapThreshold] = useState(60); // pixels for showing snap lines
+  
+  // FIXED: Ridotto significativamente il threshold di snap per evitare sovrapposizioni visive
+  const [snapThreshold] = useState(15); // Ridotto da 60 a 15 pixel
+  const [visualSnapThreshold] = useState(15); // pixels for showing snap lines
   const [activeSnapLines, setActiveSnapLines] = useState<number[]>([]);
 
-  // Stati per il drag ottimizzato - RIVISTO
+  // Stati per il drag ottimizzato
   const [dragPreview, setDragPreview] = useState<{
     itemId: string;
     startTime: number;
@@ -184,10 +186,11 @@ export const Timeline = ({
     return snapPoints.sort((a, b) => a.time - b.time);
   }, [items]);
 
-  // FIXED: Improved collision detection with small tolerance for floating point precision
+  // FIXED: Migliorata la detection di sovrapposizione con tolleranza più appropriata
   const wouldCauseOverlap = useCallback((startTime: number, duration: number, track: number, excludeId: string) => {
     const itemEnd = startTime + duration;
-    const tolerance = 0.001; // Small tolerance for floating point precision
+    // FIXED: Aumentata la tolleranza per evitare sovrapposizioni visive
+    const tolerance = 0.1; // Aumentata da 0.001 a 0.1 secondi per essere visivamente sicuri
     
     return items.some(item => {
       if (item.id === excludeId || item.track !== track) return false;
@@ -195,62 +198,87 @@ export const Timeline = ({
       const otherStart = item.startTime;
       const otherEnd = item.startTime + item.duration;
       
-      // Check for overlap with tolerance: items overlap if one starts before the other ends (with small gap tolerance)
+      // FIXED: Logica più rigorosa per prevenire sovrapposizioni visive
+      // Un elemento si sovrappone se c'è anche solo un minimo overlap
       return (startTime < otherEnd - tolerance && itemEnd > otherStart + tolerance);
     });
   }, [items]);
 
-  // FIXED: Completely redesigned snap logic to eliminate visual overlaps
+  // FIXED: Logica di snap completamente riscritta per eliminare sovrapposizioni visive
   const findSnapPoint = useCallback((currentTime: number, snapPoints: { time: number; type: 'start' | 'end' | 'timeline-start' }[], draggedItemDuration: number, targetTrack: number, draggedItemId: string): { 
     time: number; 
     snapped: boolean; 
     snapLine?: number; 
     showSnapLine?: boolean 
   } => {
+    // FIXED: Threshold più piccolo e più preciso
     const snapThresholdTime = snapThreshold / scale;
+    const minGap = 0.1; // Gap minimo tra elementi per evitare sovrapposizioni visive
 
     let bestSnapResult: { 
-      elementStartTime: number; // Where the element should start
-      snapLinePosition: number; // Where the yellow line appears
+      elementStartTime: number;
+      snapLinePosition: number;
       distance: number;
     } | null = null;
 
     const draggedItemStart = currentTime;
     const draggedItemEnd = currentTime + draggedItemDuration;
 
-    // Evaluate each snap point
+    // Valuta ogni snap point
     for (const snapPoint of snapPoints) {
       
-      // Option 1: Connect START of dragged item to this snap point
-      // Yellow line appears at snapPoint.time, element starts exactly there
+      // Opzione 1: Connetti INIZIO dell'elemento trascinato a questo snap point
       const startSnapDistance = Math.abs(draggedItemStart - snapPoint.time);
       if (startSnapDistance <= snapThresholdTime) {
-        const elementStartTime = snapPoint.time; // Element starts exactly at snap point
+        const elementStartTime = snapPoint.time;
         
-        // Check if this would cause overlap
-        if (!wouldCauseOverlap(elementStartTime, draggedItemDuration, targetTrack, draggedItemId)) {
-          if (!bestSnapResult || startSnapDistance < bestSnapResult.distance) {
+        // FIXED: Controllo più rigoroso per evitare sovrapposizioni
+        if (elementStartTime >= 0 && !wouldCauseOverlap(elementStartTime, draggedItemDuration, targetTrack, draggedItemId)) {
+          // Verifica ulteriore: assicurati che non ci siano elementi troppo vicini
+          const hasNearbyConflict = items.some(item => {
+            if (item.id === draggedItemId || item.track !== targetTrack) return false;
+            const distance = Math.min(
+              Math.abs(elementStartTime - item.startTime),
+              Math.abs(elementStartTime - (item.startTime + item.duration)),
+              Math.abs((elementStartTime + draggedItemDuration) - item.startTime),
+              Math.abs((elementStartTime + draggedItemDuration) - (item.startTime + item.duration))
+            );
+            return distance < minGap && distance > 0.001;
+          });
+
+          if (!hasNearbyConflict && (!bestSnapResult || startSnapDistance < bestSnapResult.distance)) {
             bestSnapResult = {
               elementStartTime: elementStartTime,
-              snapLinePosition: snapPoint.time, // Line appears at snap point
+              snapLinePosition: snapPoint.time,
               distance: startSnapDistance
             };
           }
         }
       }
 
-      // Option 2: Connect END of dragged item to this snap point  
-      // Yellow line appears at snapPoint.time, element ends exactly there
+      // Opzione 2: Connetti FINE dell'elemento trascinato a questo snap point
       const endSnapDistance = Math.abs(draggedItemEnd - snapPoint.time);
       if (endSnapDistance <= snapThresholdTime) {
-        const elementStartTime = snapPoint.time - draggedItemDuration; // Element ends at snap point
+        const elementStartTime = snapPoint.time - draggedItemDuration;
         
-        // Ensure start time is not negative and check overlap
+        // FIXED: Controllo più rigoroso per evitare sovrapposizioni
         if (elementStartTime >= 0 && !wouldCauseOverlap(elementStartTime, draggedItemDuration, targetTrack, draggedItemId)) {
-          if (!bestSnapResult || endSnapDistance < bestSnapResult.distance) {
+          // Verifica ulteriore: assicurati che non ci siano elementi troppo vicini
+          const hasNearbyConflict = items.some(item => {
+            if (item.id === draggedItemId || item.track !== targetTrack) return false;
+            const distance = Math.min(
+              Math.abs(elementStartTime - item.startTime),
+              Math.abs(elementStartTime - (item.startTime + item.duration)),
+              Math.abs((elementStartTime + draggedItemDuration) - item.startTime),
+              Math.abs((elementStartTime + draggedItemDuration) - (item.startTime + item.duration))
+            );
+            return distance < minGap && distance > 0.001;
+          });
+
+          if (!hasNearbyConflict && (!bestSnapResult || endSnapDistance < bestSnapResult.distance)) {
             bestSnapResult = {
               elementStartTime: elementStartTime,
-              snapLinePosition: snapPoint.time, // Line appears at snap point  
+              snapLinePosition: snapPoint.time,
               distance: endSnapDistance
             };
           }
@@ -262,14 +290,13 @@ export const Timeline = ({
       return { time: currentTime, snapped: false, showSnapLine: false };
     }
 
-    // Return the correct element position and snap line position
     return {
-      time: bestSnapResult.elementStartTime, // Where element actually goes
+      time: bestSnapResult.elementStartTime,
       snapped: true,
-      snapLine: bestSnapResult.snapLinePosition, // Where yellow line appears
+      snapLine: bestSnapResult.snapLinePosition,
       showSnapLine: true
     };
-  }, [scale, snapThreshold, wouldCauseOverlap]);
+  }, [scale, snapThreshold, wouldCauseOverlap, items]);
 
   // Validate track compatibility
   const isValidTrack = useCallback((track: number, mediaType: string) => {
@@ -373,7 +400,7 @@ export const Timeline = ({
     });
   };
 
-  // FIXED: Simplified throttled update - no more dual updates during drag
+  // Throttled update durante il drag
   const throttledUpdateItems = useCallback(
     throttle((updatedItems: TimelineItem[]) => {
       onItemsChange(updatedItems);
@@ -381,13 +408,13 @@ export const Timeline = ({
     [onItemsChange]
   );
 
-  // FIXED: Handle mouse move for dragging and resizing with improved snap logic
+  // Handle mouse move for dragging and resizing with improved snap logic
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!timelineContentRef.current) return;
 
       if (resizing) {
-        // Resize logic - mantenuta ma ottimizzata
+        // Resize logic con snap migliorato
         const rect = timelineContentRef.current.getBoundingClientRect();
         const mouseX = e.clientX - rect.left + scrollLeft;
         const newTime = mouseX / scale;
@@ -400,12 +427,11 @@ export const Timeline = ({
         const updatedItems = items.map(i => {
           if (i.id === resizing.itemId) {
             if (resizing.edge === 'left') {
-              // Left edge resize - we want the START of the item to snap to points
               const maxStartTime = i.startTime + i.duration - 0.1;
               let newStartTime = newTime;
               let snapLineTime: number | undefined;
 
-              // Check if we can snap the start to any snap point
+              // FIXED: Snap più preciso per il resize
               for (const snapPoint of snapPoints) {
                 const distanceToSnap = Math.abs(newTime - snapPoint.time);
                 const snapThresholdTime = snapThreshold / scale;
@@ -435,21 +461,16 @@ export const Timeline = ({
                 duration: i.duration + durationChange
               };
             } else {
-              // Right edge resize - we want the END of the item to snap to points
-              const currentEndTime = i.startTime + i.duration;
               const minEndTime = i.startTime + 0.1;
-              
-              // For right edge, we're moving the end position
               let newEndTime = newTime;
               let snapLineTime: number | undefined;
 
-              // Check if we can snap the end to any snap point
+              // FIXED: Snap più preciso per il resize della fine
               for (const snapPoint of snapPoints) {
                 const distanceToSnap = Math.abs(newTime - snapPoint.time);
                 const snapThresholdTime = snapThreshold / scale;
                 
                 if (distanceToSnap <= snapThresholdTime) {
-                  // Check if this end position would cause overlap
                   const testDuration = snapPoint.time - i.startTime;
                   if (testDuration > 0.1 && !wouldCauseOverlap(i.startTime, testDuration, i.track, i.id)) {
                     newEndTime = snapPoint.time;
@@ -477,7 +498,7 @@ export const Timeline = ({
         });
         onItemsChange(updatedItems);
       } else if (isDragging && draggedItem && dragStateRef.current.isDragging) {
-        // FIXED: Improved drag logic with better snapping
+        // FIXED: Logica di drag migliorata
         const rect = timelineContentRef.current.getBoundingClientRect();
         const mouseX = e.clientX - rect.left + scrollLeft;
         const mouseY = e.clientY - rect.top - 16;
@@ -498,7 +519,7 @@ export const Timeline = ({
             dragStateRef.current.startTrack = newTrack;
           }
 
-          // FIXED: Durante il drag, aggiorna SOLO il drag preview, NON gli items
+          // FIXED: Usa la nuova logica di snap migliorata
           const snapResult = findSnapPoint(rawTime, snapPoints, dragStateRef.current.draggedItemDuration, newTrack, draggedItem);
           const finalTime = snapResult.time;
 
@@ -509,7 +530,7 @@ export const Timeline = ({
             setActiveSnapLines([]);
           }
 
-          // FIXED: Aggiorna SOLO il drag preview durante il trascinamento
+          // Aggiorna il drag preview
           const newDragPreview = {
             itemId: draggedItem,
             startTime: finalTime,
@@ -519,10 +540,8 @@ export const Timeline = ({
           };
 
           setDragPreview(newDragPreview);
-
-          // NON aggiornare gli items durante il drag - solo il preview!
         } else {
-          // Track non valido - mantieni posizione ma senza snapping
+          // Track non valido
           const newDragPreview = {
             itemId: draggedItem,
             startTime: rawTime,
@@ -537,7 +556,7 @@ export const Timeline = ({
     };
 
     const handleMouseUp = () => {
-      // FIXED: Applica le modifiche dal drag preview agli items effettivi
+      // Applica le modifiche dal drag preview agli items effettivi
       if (isDragging && draggedItem && dragPreview) {
         const updatedItems = items.map(item =>
           item.id === draggedItem
@@ -549,7 +568,6 @@ export const Timeline = ({
 
       // Save to history only when drag/resize ends
       if ((isDragging || resizing) && initialItemsForDrag) {
-        // Per il drag, usa gli items aggiornati con il drag preview
         let finalItems = items;
         if (isDragging && draggedItem && dragPreview) {
           finalItems = items.map(item =>
@@ -586,11 +604,11 @@ export const Timeline = ({
   }, [isDragging, draggedItem, resizing, items, scale, scrollLeft,
       calculateSnapPoints, findSnapPoint, isValidTrack, onItemsChangeWithHistory, throttledUpdateItems]);
 
-  // FIXED: Render timeline item with improved drag preview handling
+  // Render timeline item with improved drag preview handling
   const renderTimelineItem = (item: TimelineItem, track: number) => {
     const isDraggedItem = draggedItem === item.id;
     
-    // FIXED: Use drag preview data if available, otherwise use item data
+    // Use drag preview data if available, otherwise use item data
     let displayStartTime = item.startTime;
     let displayTrack = track;
     
@@ -748,11 +766,11 @@ export const Timeline = ({
               ))}
             </div>
 
-            {/* FIXED: Snap Lines with better visibility */}
+            {/* FIXED: Snap Lines con maggiore visibilità */}
             {(isDragging || resizing) && activeSnapLines.map((snapTime, index) => (
               <div
                 key={`snap-${index}`}
-                className="absolute top-0 bottom-0 w-0.5 bg-yellow-400/80 pointer-events-none z-20 shadow-lg"
+                className="absolute top-0 bottom-0 w-0.5 bg-yellow-400 pointer-events-none z-20 shadow-lg"
                 style={{ left: `${snapTime * scale}px` }}
               />
             ))}
