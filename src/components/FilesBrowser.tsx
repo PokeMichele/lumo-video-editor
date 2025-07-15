@@ -187,7 +187,7 @@ export const FilesBrowser = ({
         <div className="flex items-center justify-between mb-4">
           {/* Logo - OPZIONE 1: Usando un'immagine dalla cartella public */}
           <div className="flex items-center space-x-2">
-            <div className="w-8 h-8 rounded-md overflow-hidden flex items-center justify-center">
+            <div className="w-16 h-16 rounded-md overflow-hidden flex items-center justify-center">
               <img 
                 src="/lumo.png" 
                 alt="Lumo Video Editor Logo" 
