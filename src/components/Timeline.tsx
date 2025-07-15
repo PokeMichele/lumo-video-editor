@@ -543,46 +543,66 @@ export const Timeline = ({
 
         // Verifica validità track
         if (isValidTrack(newTrack, draggedItemData.mediaFile.type)) {
-          // Calculate snap points per il track corrente
+          // FIXED: MOVIMENTO LIBERO - usa sempre la posizione del mouse
+          let finalTime = rawTime;
+          let snapped = false;
+          let snapLine: number | undefined;
+          
+          // Calcola snap points solo per assistenza visiva (non per bloccare)
           let snapPoints = dragStateRef.current.snapPoints;
           if (newTrack !== dragStateRef.current.startTrack) {
             snapPoints = calculateSnapPoints(draggedItem, newTrack);
             dragStateRef.current.snapPoints = snapPoints;
             dragStateRef.current.startTrack = newTrack;
           }
-
-          // FIXED: Usa la logica di snap semplificata - niente fallback complessi
-          const snapResult = findSnapPoint(rawTime, snapPoints, dragStateRef.current.draggedItemDuration, newTrack, draggedItem);
-          const finalTime = snapResult.time;
+          
+          // Controlla snap SOLO per assistenza visiva
+          const snapThresholdTime = snapThreshold / scale;
+          for (const snapPoint of snapPoints) {
+            if (Math.abs(rawTime - snapPoint.time) <= snapThresholdTime) {
+              finalTime = snapPoint.time;
+              snapped = true;
+              snapLine = snapPoint.time;
+              break;
+            }
+            
+            if (Math.abs((rawTime + draggedItemData.duration) - snapPoint.time) <= snapThresholdTime) {
+              finalTime = snapPoint.time - draggedItemData.duration;
+              snapped = true;
+              snapLine = snapPoint.time;
+              break;
+            }
+          }
+          
+          // Assicurati che il tempo non sia negativo
+          finalTime = Math.max(0, finalTime);
 
           // Update snap lines
-          if (snapResult.showSnapLine && snapResult.snapLine !== undefined) {
-            setActiveSnapLines([snapResult.snapLine]);
+          if (snapped && snapLine !== undefined) {
+            setActiveSnapLines([snapLine]);
           } else {
             setActiveSnapLines([]);
           }
 
-          // Aggiorna il drag preview con informazione di validità
-          const isValidPosition = !wouldCauseOverlap(finalTime, draggedItemData.duration, newTrack, draggedItem);
-          
+          // SEMPRE VALIDO - aggiorna il drag preview
           const newDragPreview = {
             itemId: draggedItem,
             startTime: finalTime,
             track: newTrack,
-            isSnapped: snapResult.snapped,
-            snapLineTime: snapResult.snapLine,
-            isValidPosition: isValidPosition
+            isSnapped: snapped,
+            snapLineTime: snapLine,
+            isValidPosition: true // SEMPRE valido
           };
 
           setDragPreview(newDragPreview);
         } else {
-          // Track non valido o posizione non valida
+          // Track non valido - ma permetti comunque il movimento visivo
           const newDragPreview = {
             itemId: draggedItem,
-            startTime: rawTime,
+            startTime: Math.max(0, rawTime),
             track: newTrack,
             isSnapped: false,
-            isValidPosition: false
+            isValidPosition: false // Solo per feedback visivo
           };
 
           setDragPreview(newDragPreview);
@@ -595,17 +615,25 @@ export const Timeline = ({
       console.log('=== Mouse Up - Final Drop ===');
       let finalItems = [...items];
       
-      // FIXED: Applica SEMPRE le modifiche dal drag preview senza controlli aggiuntivi
+      // FIXED: Applica la posizione finale con controllo solo del track
       if (isDragging && draggedItem && dragPreview) {
         console.log(`Applying final position: ${dragPreview.startTime}s on track ${dragPreview.track}`);
         
-        finalItems = items.map(item =>
-          item.id === draggedItem
-            ? { ...item, startTime: dragPreview.startTime, track: dragPreview.track }
-            : item
-        );
-        
-        console.log('✅ Final position applied without restrictions');
+        const draggedItemData = items.find(i => i.id === draggedItem);
+        if (draggedItemData) {
+          // Verifica solo se il track è valido per il tipo di media
+          if (isValidTrack(dragPreview.track, draggedItemData.mediaFile.type)) {
+            finalItems = items.map(item =>
+              item.id === draggedItem
+                ? { ...item, startTime: dragPreview.startTime, track: dragPreview.track }
+                : item
+            );
+            console.log('✅ Final position applied');
+          } else {
+            console.log('❌ Invalid track for media type, keeping original position');
+            finalItems = initialItemsForDrag || items;
+          }
+        }
       }
 
       // Applica sempre le modifiche
