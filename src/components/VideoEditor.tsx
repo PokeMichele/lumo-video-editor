@@ -186,7 +186,7 @@ export const VideoEditor = () => {
         {/* Right Panel - Diviso in due sezioni */}
         <div className="flex-1 flex flex-col">
           {/* Video Player - LIMITATO A METÀ ALTEZZA */}
-          <div className="h-3/4 relative bg-card border-b border-border">
+          <div className="h-1/2 relative bg-card border-b border-border">
             <div className="absolute top-4 right-4 z-10">
               <Button
                 onClick={handleExport}
@@ -215,14 +215,6 @@ export const VideoEditor = () => {
                 <Button variant="outline" size="sm">Aggiungi Effetto</Button>
                 <Button variant="outline" size="sm">Regola Colori</Button>
                 <Button variant="outline" size="sm">Audio Mix</Button>
-              </div>
-
-              {/* Informazioni progetto */}
-              <div className="mt-6 text-xs text-muted-foreground/70">
-                <p>Timeline Items: {timelineItems.length}</p>
-                <p>Total Duration: {Math.round(totalDuration)}s</p>
-                <p>Current Time: {Math.round(currentTime)}s</p>
-                <p>Tracks: {tracks.filter(t => t.type === 'video').length} Video, {tracks.filter(t => t.type === 'audio').length} Audio</p>
               </div>
             </div>
           </div>
