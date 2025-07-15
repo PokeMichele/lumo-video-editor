@@ -136,7 +136,7 @@ export const Timeline = ({
     }
   };
 
-  // Generate time markers - FIXED: Posizionamento corretto del timestamp 0:00
+  // Generate time markers - FIXED: Linea del timestamp 0:00 perfettamente allineata all'inizio
   const generateTimeMarkers = () => {
     const markers = [];
     const interval = totalDuration > 60 ? 10 : 5; // 10s intervals for long videos, 5s for short
@@ -148,11 +148,15 @@ export const Timeline = ({
       markers.push(
         <div
           key={i}
-          className={`absolute top-0 flex flex-col ${isFirstMarker ? 'items-start' : 'items-center'}`}
+          className="absolute top-0 flex flex-col items-center"
           style={{ left: `${position}px` }}
         >
+          {/* Linea sempre centrata */}
           <div className="w-px h-4 bg-timeline-ruler"></div>
-          <span className="text-xs text-muted-foreground mt-1 font-mono">
+          {/* Testo: centrato per tutti tranne il primo che è allineato a sinistra */}
+          <span 
+            className={`text-xs text-muted-foreground mt-1 font-mono ${isFirstMarker ? 'self-start' : ''}`}
+          >
             {formatTime(i)}
           </span>
         </div>
@@ -700,8 +704,8 @@ export const Timeline = ({
               className="absolute top-0 bottom-0 w-0.5 bg-playhead z-30 pointer-events-none"
               style={{ left: `${playheadPosition}px` }}
             >
-              {/* FIXED: Diamante centrato correttamente rispetto alla linea */}
-              <div className="absolute -top-1 -left-2 w-4 h-4 bg-playhead rotate-45 transform"></div>
+              {/* FIXED: Diamante perfettamente centrato sulla linea (linea è 2px, diamante 16px, quindi -7px per centrare) */}
+              <div className="absolute -top-1 w-4 h-4 bg-playhead rotate-45 transform" style={{ left: '-7px' }}></div>
             </div>
           </div>
         </div>
