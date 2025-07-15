@@ -264,10 +264,9 @@ export const Timeline = ({
     return snapPoints.sort((a, b) => a.time - b.time);
   }, [items]);
 
-  // FIXED: Detection di sovrapposizione più precisa e permissiva
+  // FIXED: Detection di sovrapposizione semplificata e più permissiva
   const wouldCauseOverlap = useCallback((startTime: number, duration: number, track: number, excludeId: string) => {
     const itemEnd = startTime + duration;
-    const tolerance = 0.05; // Ridotta tolleranza per permettere posizionamento più preciso
     
     return items.some(item => {
       if (item.id === excludeId || item.track !== track) return false;
@@ -275,19 +274,14 @@ export const Timeline = ({
       const otherStart = item.startTime;
       const otherEnd = item.startTime + item.duration;
       
-      // Sovrapposizione solo se c'è un vero overlap, non solo vicinanza
-      const hasOverlap = (startTime < otherEnd - tolerance && itemEnd > otherStart + tolerance);
+      // Sovrapposizione vera: un elemento inizia prima che l'altro finisca
+      const hasRealOverlap = (startTime < otherEnd && itemEnd > otherStart);
       
-      // Debug: log quando blocchiamo un movimento
-      if (hasOverlap) {
-        console.log(`Overlap detected: trying to place ${excludeId} at ${startTime}-${itemEnd}, conflicts with ${item.id} at ${otherStart}-${otherEnd}`);
-      }
-      
-      return hasOverlap;
+      return hasRealOverlap;
     });
   }, [items]);
 
-  // FIXED: Logica di snap semplificata e meno restrittiva
+  // FIXED: Logica di snap completamente semplificata
   const findSnapPoint = useCallback((currentTime: number, snapPoints: { time: number; type: 'start' | 'end' | 'timeline-start' }[], draggedItemDuration: number, targetTrack: number, draggedItemId: string): { 
     time: number; 
     snapped: boolean; 
@@ -296,93 +290,71 @@ export const Timeline = ({
   } => {
     const snapThresholdTime = snapThreshold / scale;
     
-    // Prima verifica se la posizione corrente è valida (senza snap)
-    if (currentTime >= 0 && !wouldCauseOverlap(currentTime, draggedItemDuration, targetTrack, draggedItemId)) {
-      // Cerca snap points solo se siamo vicini a uno
-      let bestSnapResult: { 
-        elementStartTime: number;
-        snapLinePosition: number;
-        distance: number;
-      } | null = null;
-
-      const draggedItemStart = currentTime;
-      const draggedItemEnd = currentTime + draggedItemDuration;
-
-      // Valuta ogni snap point solo per trovare il migliore, non per bloccare
-      for (const snapPoint of snapPoints) {
-        
-        // Opzione 1: Snap inizio elemento a questo punto
-        const startSnapDistance = Math.abs(draggedItemStart - snapPoint.time);
-        if (startSnapDistance <= snapThresholdTime) {
-          const elementStartTime = snapPoint.time;
-          
-          if (elementStartTime >= 0 && !wouldCauseOverlap(elementStartTime, draggedItemDuration, targetTrack, draggedItemId)) {
-            if (!bestSnapResult || startSnapDistance < bestSnapResult.distance) {
-              bestSnapResult = {
-                elementStartTime: elementStartTime,
-                snapLinePosition: snapPoint.time,
-                distance: startSnapDistance
-              };
-            }
-          }
-        }
-
-        // Opzione 2: Snap fine elemento a questo punto
-        const endSnapDistance = Math.abs(draggedItemEnd - snapPoint.time);
-        if (endSnapDistance <= snapThresholdTime) {
-          const elementStartTime = snapPoint.time - draggedItemDuration;
-          
-          if (elementStartTime >= 0 && !wouldCauseOverlap(elementStartTime, draggedItemDuration, targetTrack, draggedItemId)) {
-            if (!bestSnapResult || endSnapDistance < bestSnapResult.distance) {
-              bestSnapResult = {
-                elementStartTime: elementStartTime,
-                snapLinePosition: snapPoint.time,
-                distance: endSnapDistance
-              };
-            }
+    // Prima controlla se la posizione corrente è valida
+    const currentIsValid = currentTime >= 0 && !wouldCauseOverlap(currentTime, draggedItemDuration, targetTrack, draggedItemId);
+    
+    // Cerca il miglior snap point
+    let bestSnap: { time: number; snapLine: number; distance: number } | null = null;
+    
+    for (const snapPoint of snapPoints) {
+      // Snap all'inizio dell'elemento
+      const startDistance = Math.abs(currentTime - snapPoint.time);
+      if (startDistance <= snapThresholdTime) {
+        const snapTime = snapPoint.time;
+        if (snapTime >= 0 && !wouldCauseOverlap(snapTime, draggedItemDuration, targetTrack, draggedItemId)) {
+          if (!bestSnap || startDistance < bestSnap.distance) {
+            bestSnap = { time: snapTime, snapLine: snapPoint.time, distance: startDistance };
           }
         }
       }
-
-      // Se abbiamo trovato un buon snap point, usalo, altrimenti usa la posizione corrente
-      if (bestSnapResult) {
-        return {
-          time: bestSnapResult.elementStartTime,
-          snapped: true,
-          snapLine: bestSnapResult.snapLinePosition,
-          showSnapLine: true
-        };
-      } else {
-        // Nessun snap, ma la posizione è valida
-        return { time: currentTime, snapped: false, showSnapLine: false };
+      
+      // Snap alla fine dell'elemento
+      const endDistance = Math.abs((currentTime + draggedItemDuration) - snapPoint.time);
+      if (endDistance <= snapThresholdTime) {
+        const snapTime = snapPoint.time - draggedItemDuration;
+        if (snapTime >= 0 && !wouldCauseOverlap(snapTime, draggedItemDuration, targetTrack, draggedItemId)) {
+          if (!bestSnap || endDistance < bestSnap.distance) {
+            bestSnap = { time: snapTime, snapLine: snapPoint.time, distance: endDistance };
+          }
+        }
       }
     }
-
-    // La posizione corrente non è valida, cerca la posizione valida più vicina
-    let validPosition = currentTime;
     
-    // Prova a muovere leggermente a destra
-    for (let offset = 0.1; offset <= 2; offset += 0.1) {
+    // Se c'è un buon snap, usalo
+    if (bestSnap) {
+      return {
+        time: bestSnap.time,
+        snapped: true,
+        snapLine: bestSnap.snapLine,
+        showSnapLine: true
+      };
+    }
+    
+    // Se la posizione corrente è valida, usala
+    if (currentIsValid) {
+      return { time: currentTime, snapped: false, showSnapLine: false };
+    }
+    
+    // Altrimenti, trova la posizione valida più vicina
+    // Cerca a destra
+    for (let offset = 0.1; offset <= 10; offset += 0.1) {
       const testTime = currentTime + offset;
       if (testTime >= 0 && !wouldCauseOverlap(testTime, draggedItemDuration, targetTrack, draggedItemId)) {
-        validPosition = testTime;
-        break;
+        return { time: testTime, snapped: false, showSnapLine: false };
       }
     }
     
-    // Se non funziona a destra, prova a sinistra
-    if (validPosition === currentTime) {
-      for (let offset = 0.1; offset <= 2; offset += 0.1) {
-        const testTime = currentTime - offset;
-        if (testTime >= 0 && !wouldCauseOverlap(testTime, draggedItemDuration, targetTrack, draggedItemId)) {
-          validPosition = testTime;
-          break;
-        }
+    // Cerca a sinistra
+    for (let offset = 0.1; offset <= 10; offset += 0.1) {
+      const testTime = currentTime - offset;
+      if (testTime >= 0 && !wouldCauseOverlap(testTime, draggedItemDuration, targetTrack, draggedItemId)) {
+        return { time: testTime, snapped: false, showSnapLine: false };
       }
     }
-
-    return { time: validPosition, snapped: false, showSnapLine: false };
-  }, [scale, snapThreshold, wouldCauseOverlap, items]);
+    
+    // Come ultima risorsa, torna alla posizione corrente
+    return { time: Math.max(0, currentTime), snapped: false, showSnapLine: false };
+  }, [scale, snapThreshold, wouldCauseOverlap]);
 
   // Validate track compatibility
   const isValidTrack = useCallback((track: number, mediaType: string) => {
@@ -445,6 +417,9 @@ export const Timeline = ({
   const handleMouseDown = (e: React.MouseEvent, item: TimelineItem, isResize?: 'left' | 'right') => {
     e.preventDefault();
     e.stopPropagation();
+
+    console.log(`=== Starting drag for item: ${item.mediaFile.name} ===`);
+    console.log(`Initial position: ${item.startTime}s on track ${item.track}`);
 
     // Save initial state for history
     setInitialItemsForDrag([...items]);
@@ -606,9 +581,28 @@ export const Timeline = ({
             dragStateRef.current.startTrack = newTrack;
           }
 
-          // FIXED: Usa la nuova logica di snap migliorata
+          // FIXED: Usa la nuova logica di snap migliorata - ma consenti sempre il movimento base
           const snapResult = findSnapPoint(rawTime, snapPoints, dragStateRef.current.draggedItemDuration, newTrack, draggedItem);
-          const finalTime = snapResult.time;
+          let finalTime = snapResult.time;
+          
+          // FALLBACK: Se il snap fallisce, usa almeno la posizione raw se è valida
+          if (finalTime === rawTime && wouldCauseOverlap(finalTime, draggedItemData.duration, newTrack, draggedItem)) {
+            // Prova a trovare la posizione valida più vicina manualmente
+            finalTime = rawTime;
+            for (let offset = 0.1; offset <= 5; offset += 0.1) {
+              const testTimeRight = rawTime + offset;
+              const testTimeLeft = rawTime - offset;
+              
+              if (testTimeRight >= 0 && !wouldCauseOverlap(testTimeRight, draggedItemData.duration, newTrack, draggedItem)) {
+                finalTime = testTimeRight;
+                break;
+              }
+              if (testTimeLeft >= 0 && !wouldCauseOverlap(testTimeLeft, draggedItemData.duration, newTrack, draggedItem)) {
+                finalTime = testTimeLeft;
+                break;
+              }
+            }
+          }
 
           // Update snap lines
           if (snapResult.showSnapLine && snapResult.snapLine !== undefined) {
@@ -619,6 +613,11 @@ export const Timeline = ({
 
           // Aggiorna il drag preview con informazione di validità
           const isValidPosition = !wouldCauseOverlap(finalTime, draggedItemData.duration, newTrack, draggedItem);
+          
+          if (!isValidPosition) {
+            console.log(`⚠️  Position ${finalTime}s on track ${newTrack} would cause overlap`);
+          }
+          
           const newDragPreview = {
             itemId: draggedItem,
             startTime: finalTime,
@@ -646,10 +645,13 @@ export const Timeline = ({
     };
 
     const handleMouseUp = () => {
+      console.log('=== Mouse Up - Final Drop ===');
       let finalItems = [...items];
       
       // FIXED: Applica le modifiche finali dal drag preview
       if (isDragging && draggedItem && dragPreview) {
+        console.log(`Applying final position: ${dragPreview.startTime}s on track ${dragPreview.track}`);
+        
         finalItems = items.map(item =>
           item.id === draggedItem
             ? { ...item, startTime: dragPreview.startTime, track: dragPreview.track }
@@ -659,8 +661,10 @@ export const Timeline = ({
         // Verifica che il movimento finale sia valido
         const draggedItemFinal = finalItems.find(i => i.id === draggedItem);
         if (draggedItemFinal && wouldCauseOverlap(draggedItemFinal.startTime, draggedItemFinal.duration, draggedItemFinal.track, draggedItemFinal.id)) {
-          console.warn('Final position would cause overlap, reverting to initial position');
+          console.warn('❌ Final position would cause overlap, reverting to initial position');
           finalItems = initialItemsForDrag || items;
+        } else {
+          console.log('✅ Final position is valid');
         }
       }
 
@@ -671,10 +675,10 @@ export const Timeline = ({
       if (initialItemsForDrag) {
         const hasChanges = JSON.stringify(finalItems) !== JSON.stringify(initialItemsForDrag);
         if (hasChanges) {
-          console.log('Saving drag changes to history');
+          console.log('💾 Saving drag changes to history');
           onItemsChangeWithHistory(finalItems);
         } else {
-          console.log('No changes detected, not saving to history');
+          console.log('⏸️  No changes detected, not saving to history');
         }
       }
 
@@ -686,6 +690,7 @@ export const Timeline = ({
       setInitialItemsForDrag(null);
       setActiveSnapLines([]);
       dragStateRef.current.isDragging = false;
+      console.log('=== Drag completed ===\n');
     };
 
     if (isDragging || resizing) {

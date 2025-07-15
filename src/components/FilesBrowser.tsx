@@ -13,6 +13,8 @@ interface FilesBrowserProps {
   onRedo: () => void;
   canUndo: boolean;
   canRedo: boolean;
+  historyIndex: number;
+  historyLength: number;
 }
 
 export const FilesBrowser = ({
@@ -23,7 +25,9 @@ export const FilesBrowser = ({
   onUndo,
   onRedo,
   canUndo,
-  canRedo
+  canRedo,
+  historyIndex,
+  historyLength
 }: FilesBrowserProps) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -175,28 +179,36 @@ export const FilesBrowser = ({
             <span className="text-sm font-medium text-muted-foreground">Video Editor</span>
           </div>
 
-          {/* Undo/Redo buttons */}
-          <div className="flex items-center space-x-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onUndo}
-              disabled={!canUndo}
-              className="w-8 h-8 p-0 hover:bg-accent/50"
-              title="Undo (Ctrl+Z)"
-            >
-              <Undo2 className="w-4 h-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onRedo}
-              disabled={!canRedo}
-              className="w-8 h-8 p-0 hover:bg-accent/50"
-              title="Redo (Ctrl+Y)"
-            >
-              <Redo2 className="w-4 h-4" />
-            </Button>
+          {/* History indicator and Undo/Redo buttons */}
+          <div className="flex items-center space-x-2">
+            {/* History indicator */}
+            <span className="text-xs text-muted-foreground/70 font-mono">
+              {historyIndex + 1}/{historyLength}
+            </span>
+            
+            {/* Undo/Redo buttons */}
+            <div className="flex items-center space-x-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onUndo}
+                disabled={!canUndo}
+                className="w-8 h-8 p-0 hover:bg-accent/50"
+                title="Undo (Ctrl+Z)"
+              >
+                <Undo2 className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onRedo}
+                disabled={!canRedo}
+                className="w-8 h-8 p-0 hover:bg-accent/50"
+                title="Redo (Ctrl+Y)"
+              >
+                <Redo2 className="w-4 h-4" />
+              </Button>
+            </div>
           </div>
         </div>
 

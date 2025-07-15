@@ -165,6 +165,8 @@ export const VideoEditor = () => {
             onRedo={handleRedo}
             canUndo={historyIndex > 0}
             canRedo={historyIndex < history.length - 1}
+            historyIndex={historyIndex}
+            historyLength={history.length}
           />
         </div>
 
@@ -205,12 +207,11 @@ export const VideoEditor = () => {
                 <Button variant="outline" size="sm">Audio Mix</Button>
               </div>
 
-              {/* Debug info */}
-              <div className="mt-4 text-xs text-muted-foreground/70">
+              {/* Informazioni progetto - senza debug history */}
+              <div className="mt-6 text-xs text-muted-foreground/70">
                 <p>Timeline Items: {timelineItems.length}</p>
                 <p>Total Duration: {Math.round(totalDuration)}s</p>
                 <p>Current Time: {Math.round(currentTime)}s</p>
-                <p>History: {historyIndex + 1}/{history.length}</p>
               </div>
             </div>
           </div>
