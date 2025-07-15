@@ -3,7 +3,7 @@ import { Card } from "@/components/ui/card";
 import { TimelineItem } from "./VideoEditor";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
-import { Copy, Scissors, Trash2 } from "lucide-react";
+import { Copy, Scissors, Trash2, Plus, Minus } from "lucide-react";
 
 interface TimelineProps {
   items: TimelineItem[];
@@ -52,6 +52,7 @@ export const Timeline = ({
   const [copiedItems, setCopiedItems] = useState<TimelineItem[]>([]); // Per copia multipla
   const [resizing, setResizing] = useState<{ itemId: string; edge: 'left' | 'right' } | null>(null);
   const [scrollLeft, setScrollLeft] = useState(0);
+  const [scrollTop, setScrollTop] = useState(0); // Aggiunto per scroll verticale
   
   // Stati per la selezione multipla
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
@@ -169,13 +170,23 @@ export const Timeline = ({
     }
   }, []);
 
-  // Handle scroll della timeline
+  // Handle scroll della timeline - sincronizza orizzontale e verticale
   const handleTimelineContentScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const newScrollLeft = e.currentTarget.scrollLeft;
+    const newScrollTop = e.currentTarget.scrollTop;
+    
     setScrollLeft(newScrollLeft);
+    setScrollTop(newScrollTop);
 
+    // Sincronizza l'header orizzontalmente
     if (timelineHeaderContentRef.current) {
       timelineHeaderContentRef.current.style.transform = `translateX(-${newScrollLeft}px)`;
+    }
+
+    // Sincronizza le label verticalmente
+    const trackLabelsElement = document.querySelector('.track-labels-container') as HTMLElement;
+    if (trackLabelsElement) {
+      trackLabelsElement.style.transform = `translateY(-${newScrollTop}px)`;
     }
   };
 
@@ -384,6 +395,65 @@ export const Timeline = ({
     onItemsChangeWithHistory(updatedItems);
   }, [tracks, items, onItemsChangeWithHistory]);
 
+  // Rimuovi traccia
+  const removeTrack = useCallback((trackToRemove: Track) => {
+    const sameTypeTracks = tracks.filter(t => t.type === trackToRemove.type);
+    
+    // Verifica che ci sia sempre almeno una traccia video e una audio
+    if (sameTypeTracks.length <= 1) {
+      return; // Non permettere la rimozione dell'ultima traccia del tipo
+    }
+    
+    // Verifica che la traccia non abbia elementi
+    const hasItems = items.some(item => item.track === trackToRemove.index);
+    if (hasItems) {
+      return; // Non permettere la rimozione di tracce con elementi
+    }
+    
+    // Rimuovi la traccia
+    const newTracks = tracks.filter(t => t.id !== trackToRemove.id);
+    
+    // Aggiorna gli indici delle tracce successive
+    newTracks.forEach(track => {
+      if (track.index > trackToRemove.index) {
+        track.index -= 1;
+      }
+    });
+    
+    // Aggiorna gli elementi nella timeline spostando le tracce successive
+    const updatedItems = items.map(item => {
+      if (item.track > trackToRemove.index) {
+        return { ...item, track: item.track - 1 };
+      }
+      return item;
+    });
+    
+    // Rinumera correttamente tutte le tracce dello stesso tipo
+    let videoCounter = 1;
+    let audioCounter = 1;
+    
+    const finalTracks = newTracks
+      .sort((a, b) => a.index - b.index)
+      .map(track => {
+        if (track.type === 'video') {
+          return { ...track, label: `Video ${videoCounter++}` };
+        } else {
+          return { ...track, label: `Audio ${audioCounter++}` };
+        }
+      });
+    
+    setTracks(finalTracks);
+    onItemsChangeWithHistory(updatedItems);
+  }, [tracks, items, onItemsChangeWithHistory]);
+
+  // Verifica se una traccia può essere rimossa
+  const canRemoveTrack = useCallback((track: Track) => {
+    const sameTypeTracks = tracks.filter(t => t.type === track.type);
+    const hasItems = items.some(item => item.track === track.index);
+    
+    return sameTypeTracks.length > 1 && !hasItems;
+  }, [tracks, items]);
+
   // Calcola gli elementi dentro il rettangolo di selezione
   const getItemsInSelectionRect = useCallback(() => {
     if (!selectionStart || !selectionEnd) return [];
@@ -519,7 +589,7 @@ export const Timeline = ({
       if (!rect) return;
 
       const mouseX = e.clientX - rect.left + scrollLeft;
-      const mouseY = e.clientY - rect.top;
+      const mouseY = e.clientY - rect.top + scrollTop; // Aggiunto scrollTop
 
       // Se l'elemento non è selezionato e non si tiene Ctrl, selezionalo
       if (!selectedItems.has(item.id) && !(e.ctrlKey || e.metaKey)) {
@@ -571,7 +641,7 @@ export const Timeline = ({
       if (!rect) return;
 
       const mouseX = e.clientX - rect.left + scrollLeft;
-      const mouseY = e.clientY - rect.top;
+      const mouseY = e.clientY - rect.top + scrollTop; // Aggiunto scrollTop
 
       setIsSelecting(true);
       setSelectionStart({ x: mouseX, y: mouseY });
@@ -601,7 +671,7 @@ export const Timeline = ({
       if (isSelecting && selectionStart) {
         // Aggiorna selezione rettangolare
         const mouseX = e.clientX - rect.left + scrollLeft;
-        const mouseY = e.clientY - rect.top;
+        const mouseY = e.clientY - rect.top + scrollTop; // Aggiunto scrollTop
         
         setSelectionEnd({ x: mouseX, y: mouseY });
 
@@ -875,9 +945,9 @@ export const Timeline = ({
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDragging, draggedItem, dragState, resizing, isSelecting, selectionStart, items, scale, scrollLeft, 
+  }, [isDragging, draggedItem, dragState, resizing, isSelecting, selectionStart, items, scale, scrollLeft, scrollTop,
       calculateSnapPoints, findPotentialSnapPoint, isValidTrack, onItemsChange, onItemsChangeWithHistory, 
-      selectedItems, getItemsInSelectionRect]);
+      selectedItems, getItemsInSelectionRect, tracks]);
 
   // Render timeline item
   const renderTimelineItem = (item: TimelineItem, track: number) => {
@@ -1051,36 +1121,58 @@ export const Timeline = ({
       {/* Timeline Tracks */}
       <div className="flex-1 relative overflow-hidden">
         {/* Track Labels */}
-        <div className="absolute left-0 top-0 w-20 h-full bg-secondary/50 border-r border-border z-20">
-          {tracks.map((track, index) => (
-            <div key={track.id} className="relative">
-              <div
-                className="absolute w-full h-14 flex flex-col items-center justify-center text-xs font-medium text-muted-foreground border-b border-border/30"
-                style={{ top: `${track.index * 60 + 8}px` }}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  if (copiedItems.length > 0 || copiedItem) {
-                    if (copiedItems.length > 0) {
-                      handlePaste(track.index);
-                    } else if (copiedItem && isValidTrack(track.index, copiedItem.mediaFile.type)) {
-                      handlePaste(track.index);
+        <div className="absolute left-0 top-0 w-20 h-full bg-secondary/50 border-r border-border z-20 overflow-hidden">
+          <div className="track-labels-container">
+            {tracks.map((track, index) => (
+              <div key={track.id} className="relative">
+                <div
+                  className="absolute w-full h-14 flex flex-col items-center justify-center text-xs font-medium text-muted-foreground border-b border-border/30"
+                  style={{ top: `${track.index * 60 + 8}px` }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    if (copiedItems.length > 0 || copiedItem) {
+                      if (copiedItems.length > 0) {
+                        handlePaste(track.index);
+                      } else if (copiedItem && isValidTrack(track.index, copiedItem.mediaFile.type)) {
+                        handlePaste(track.index);
+                      }
                     }
-                  }
-                }}
-              >
-                <span className="text-[10px] leading-tight">{track.label}</span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="w-4 h-4 p-0 mt-1 text-xs hover:bg-accent/50 rounded-sm"
-                  onClick={() => addTrack(track.type, track.index)}
-                  title={`Add new ${track.type} track`}
+                  }}
                 >
-                  +
-                </Button>
+                  <span className="text-[10px] leading-tight mb-1">{track.label}</span>
+                  <div className="flex gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="w-4 h-4 p-0 text-[10px] hover:bg-green-500/50 text-green-400 hover:text-white rounded-sm"
+                      onClick={() => addTrack(track.type, track.index)}
+                      title={`Add new ${track.type} track`}
+                    >
+                      <Plus className="w-2 h-2" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className={`w-4 h-4 p-0 text-[10px] rounded-sm ${
+                        canRemoveTrack(track) 
+                          ? 'hover:bg-red-500/50 text-red-400 hover:text-white' 
+                          : 'opacity-30 cursor-not-allowed text-gray-500'
+                      }`}
+                      onClick={() => canRemoveTrack(track) && removeTrack(track)}
+                      disabled={!canRemoveTrack(track)}
+                      title={
+                        canRemoveTrack(track) 
+                          ? `Remove ${track.type} track` 
+                          : `Cannot remove: ${items.some(item => item.track === track.index) ? 'track has items' : 'minimum one track required'}`
+                      }
+                    >
+                      <Minus className="w-2 h-2" />
+                    </Button>
+                  </div>
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
 
         {/* Timeline Content */}
