@@ -200,15 +200,14 @@ export const Timeline = ({
     });
   }, [items]);
 
-  // FIXED: Find the closest snap point with collision detection
+  // FIXED: Simplified snap logic - if snap line shows, snap immediately
   const findSnapPoint = useCallback((currentTime: number, snapPoints: { time: number; type: 'start' | 'end' | 'timeline-start' }[], draggedItemDuration: number, targetTrack: number, draggedItemId: string): { 
     time: number; 
     snapped: boolean; 
     snapLine?: number; 
     showSnapLine?: boolean 
   } => {
-    const snapThresholdTime = snapThreshold / scale;
-    const visualSnapThresholdTime = visualSnapThreshold / scale;
+    const snapThresholdTime = snapThreshold / scale; // Use same threshold for both
 
     let bestSnapOption: { 
       time: number; 
@@ -224,7 +223,7 @@ export const Timeline = ({
     for (const snapPoint of snapPoints) {
       // Option 1: Snap dragged item's START to this snap point
       const startSnapDistance = Math.abs(draggedItemStart - snapPoint.time);
-      if (startSnapDistance <= visualSnapThresholdTime) {
+      if (startSnapDistance <= snapThresholdTime) {
         const potentialStartTime = snapPoint.time;
         
         // Check if this would cause overlap
@@ -242,7 +241,7 @@ export const Timeline = ({
 
       // Option 2: Snap dragged item's END to this snap point
       const endSnapDistance = Math.abs(draggedItemEnd - snapPoint.time);
-      if (endSnapDistance <= visualSnapThresholdTime) {
+      if (endSnapDistance <= snapThresholdTime) {
         const potentialStartTime = snapPoint.time - draggedItemDuration;
         
         // Ensure start time is not negative and check overlap
@@ -263,15 +262,14 @@ export const Timeline = ({
       return { time: currentTime, snapped: false, showSnapLine: false };
     }
 
-    const shouldSnap = bestSnapOption.distance <= snapThresholdTime;
-    
+    // FIXED: If we show the snap line, we always snap immediately
     return {
-      time: shouldSnap ? bestSnapOption.time : currentTime,
-      snapped: shouldSnap,
+      time: bestSnapOption.time, // Always use snapped position when line is shown
+      snapped: true, // Always snap when we show the line
       snapLine: bestSnapOption.snapTime,
       showSnapLine: true
     };
-  }, [scale, snapThreshold, visualSnapThreshold, wouldCauseOverlap]);
+  }, [scale, snapThreshold, wouldCauseOverlap]);
 
   // Validate track compatibility
   const isValidTrack = useCallback((track: number, mediaType: string) => {
