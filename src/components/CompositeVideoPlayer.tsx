@@ -503,13 +503,17 @@ export const CompositeVideoPlayer = ({
       <div ref={hiddenVideoContainerRef} style={{ display: 'none' }} />
 
       {/* Video Display Area - Canvas per composizione */}
-      <div className="flex-1 flex items-center justify-center bg-black relative p-4">
+      <div className="flex-1 flex items-center justify-center bg-black relative p-2 min-h-0">
         <canvas
           ref={canvasRef}
           width={1280}
           height={720}
-          className="max-w-full max-h-full border border-muted-foreground/20 bg-black"
-          style={{ aspectRatio: '16/9' }}
+          className="w-full h-full object-contain border border-muted-foreground/20 bg-black"
+          style={{ 
+            aspectRatio: '16/9',
+            maxHeight: 'calc(100% - 20px)', // Lascia spazio per il padding
+            maxWidth: 'calc(100% - 20px)'
+          }}
           onClick={() => {
             if (!userInteracted) {
               setUserInteracted(true);
@@ -547,14 +551,14 @@ export const CompositeVideoPlayer = ({
 
         {/* Audio Warning */}
         {!userInteracted && (
-          <div className="absolute bottom-4 left-4 bg-yellow-600/90 text-white px-3 py-2 rounded-md text-sm backdrop-blur-sm">
-            ⚠️ Click anywhere to enable audio
+          <div className="absolute bottom-2 left-2 bg-yellow-600/90 text-white px-2 py-1 rounded-md text-xs backdrop-blur-sm">
+            ⚠️ Click to enable audio
           </div>
         )}
       </div>
 
       {/* Controls - Always visible */}
-      <Card className="m-4 p-4 bg-card/95 backdrop-blur-sm">
+      <Card className="m-2 p-3 bg-card/95 backdrop-blur-sm shrink-0">
         <div className="flex items-center justify-between">
           {/* Playback Controls */}
           <div className="flex items-center space-x-2">
@@ -603,7 +607,7 @@ export const CompositeVideoPlayer = ({
           </div>
 
           {/* Volume Control */}
-          <div className="flex items-center space-x-2 w-32">
+          <div className="flex items-center space-x-2 w-24">
             <Volume2 className="w-4 h-4 text-muted-foreground" />
             <Slider
               value={[volume]}
