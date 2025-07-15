@@ -56,7 +56,7 @@ export const Timeline = ({
   const [snapThreshold] = useState(15); // pixels per il snap
   const [activeSnapLines, setActiveSnapLines] = useState<number[]>([]);
   
-  // Stato per il drag con snap
+  // Stato per il drag con snap (incluso drag multiplo)
   const [dragState, setDragState] = useState<{
     startX: number;
     startY: number;
@@ -67,6 +67,14 @@ export const Timeline = ({
     snapPoints: { time: number; type: 'start' | 'end' | 'timeline-start' }[];
     potentialSnapTime?: number; // Tempo di snap potenziale
     isInSnapRange: boolean; // Se è dentro la soglia di snap
+    // Per drag multiplo
+    draggedItems: {
+      id: string;
+      originalStartTime: number;
+      originalTrack: number;
+      timeOffset: number; // Offset rispetto all'elemento principale
+      trackOffset: number; // Offset di track rispetto all'elemento principale
+    }[];
   } | null>(null);
 
   // Limiti per lo zoom
@@ -422,10 +430,31 @@ export const Timeline = ({
         setSelectedItems(new Set([item.id]));
       }
 
-      // Calcola i punti di snap per la track corrente
+      // Prepara dati per drag multiplo
+      const currentSelection = selectedItems.has(item.id) ? selectedItems : new Set([item.id]);
+      const draggedItemsData = Array.from(currentSelection).map(itemId => {
+        const targetItem = items.find(i => i.id === itemId);
+        if (!targetItem) return null;
+
+        return {
+          id: itemId,
+          originalStartTime: targetItem.startTime,
+          originalTrack: targetItem.track,
+          timeOffset: targetItem.startTime - item.startTime, // Offset rispetto all'elemento principale
+          trackOffset: targetItem.track - item.track // Offset di track rispetto all'elemento principale
+        };
+      }).filter(Boolean) as {
+        id: string;
+        originalStartTime: number;
+        originalTrack: number;
+        timeOffset: number;
+        trackOffset: number;
+      }[];
+
+      // Calcola i punti di snap per la track corrente dell'elemento principale
       const snapPoints = calculateSnapPoints(item.id, item.track);
 
-      // Stato del drag con snap
+      // Stato del drag con snap e supporto multiplo
       setDragState({
         startX: mouseX,
         startY: mouseY,
@@ -434,7 +463,8 @@ export const Timeline = ({
         currentStartTime: item.startTime,
         currentTrack: item.track,
         snapPoints,
-        isInSnapRange: false
+        isInSnapRange: false,
+        draggedItems: draggedItemsData
       });
 
       setIsDragging(true);
@@ -624,12 +654,36 @@ export const Timeline = ({
         // Aggiorna la posizione dell'elemento in tempo reale (sempre movimento libero)
         if (isValidTrack(newTrack, draggedItemData.mediaFile.type)) {
           const updatedItems = items.map(item => {
-            if (item.id === draggedItem) {
-              return {
-                ...item,
-                startTime: finalTime,
-                track: newTrack
-              };
+            if (dragState.draggedItems.some(draggedItem => draggedItem.id === item.id)) {
+              // Trova i dati dell'elemento trascinato
+              const draggedItemInfo = dragState.draggedItems.find(di => di.id === item.id);
+              if (!draggedItemInfo) return item;
+
+              if (item.id === draggedItem) {
+                // Elemento principale - usa la posizione calcolata
+                return {
+                  ...item,
+                  startTime: finalTime,
+                  track: newTrack
+                };
+              } else {
+                // Elemento secondario - calcola posizione relativa
+                const newItemTime = finalTime + draggedItemInfo.timeOffset;
+                const newItemTrack = newTrack + draggedItemInfo.trackOffset;
+
+                // Verifica se la nuova posizione è valida
+                if (newItemTime >= 0 && newItemTrack >= 0 && newItemTrack <= 2 && 
+                    isValidTrack(newItemTrack, item.mediaFile.type)) {
+                  return {
+                    ...item,
+                    startTime: newItemTime,
+                    track: newItemTrack
+                  };
+                } else {
+                  // Se la posizione non è valida, mantieni quella originale
+                  return item;
+                }
+              }
             }
             return item;
           });
@@ -656,20 +710,48 @@ export const Timeline = ({
           }
 
           const finalItems = items.map(item => {
-            if (item.id === draggedItem) {
-              if (isValidTrack(dragState.currentTrack, draggedItemData.mediaFile.type)) {
-                return {
-                  ...item,
-                  startTime: finalTime,
-                  track: dragState.currentTrack
-                };
+            if (dragState.draggedItems.some(draggedItem => draggedItem.id === item.id)) {
+              // Trova i dati dell'elemento trascinato
+              const draggedItemInfo = dragState.draggedItems.find(di => di.id === item.id);
+              if (!draggedItemInfo) return item;
+
+              if (item.id === draggedItem) {
+                // Elemento principale
+                if (isValidTrack(dragState.currentTrack, draggedItemData.mediaFile.type)) {
+                  return {
+                    ...item,
+                    startTime: finalTime,
+                    track: dragState.currentTrack
+                  };
+                } else {
+                  // Track non valido, ripristina posizione originale
+                  return {
+                    ...item,
+                    startTime: dragState.originalStartTime,
+                    track: dragState.originalTrack
+                  };
+                }
               } else {
-                // Track non valido, ripristina posizione originale
-                return {
-                  ...item,
-                  startTime: dragState.originalStartTime,
-                  track: dragState.originalTrack
-                };
+                // Elemento secondario - calcola posizione finale relativa
+                const newItemTime = finalTime + draggedItemInfo.timeOffset;
+                const newItemTrack = dragState.currentTrack + draggedItemInfo.trackOffset;
+
+                // Verifica se la nuova posizione è valida
+                if (newItemTime >= 0 && newItemTrack >= 0 && newItemTrack <= 2 && 
+                    isValidTrack(newItemTrack, item.mediaFile.type)) {
+                  return {
+                    ...item,
+                    startTime: newItemTime,
+                    track: newItemTrack
+                  };
+                } else {
+                  // Se la posizione non è valida, ripristina quella originale
+                  return {
+                    ...item,
+                    startTime: draggedItemInfo.originalStartTime,
+                    track: draggedItemInfo.originalTrack
+                  };
+                }
               }
             }
             return item;
@@ -705,6 +787,7 @@ export const Timeline = ({
   const renderTimelineItem = (item: TimelineItem, track: number) => {
     const isDraggedItem = draggedItem === item.id;
     const isSelected = selectedItems.has(item.id);
+    const isPartOfDrag = isDragging && dragState?.draggedItems.some(di => di.id === item.id);
     
     const left = item.startTime * scale;
     const width = item.duration * scale;
@@ -721,15 +804,18 @@ export const Timeline = ({
         key={item.id}
         className={`absolute h-12 rounded border-2 cursor-move transition-none group
           ${trackColors[item.mediaFile.type]} ${
-          isDraggedItem ? 'z-30 opacity-80 shadow-lg' : 'z-10'
+          isDraggedItem ? 'z-30 opacity-80 shadow-lg' : 
+          isPartOfDrag ? 'z-25 opacity-75 shadow-md' : 'z-10'
         } ${
           isSelected ? 'border-yellow-400 ring-2 ring-yellow-400/50' : 'border-white/20'
+        } ${
+          isPartOfDrag && !isDraggedItem ? 'ring-2 ring-blue-400/50' : ''
         }`}
         style={{
           left: `${left}px`,
           width: `${width}px`,
           top: `${topPosition}px`,
-          transform: isDraggedItem ? 'scale(1.02)' : 'none'
+          transform: isPartOfDrag ? 'scale(1.02)' : 'none'
         }}
         onMouseDown={(e) => {
           // Se clicca con Ctrl, gestisci la selezione
@@ -754,8 +840,8 @@ export const Timeline = ({
           }
         }}
       >
-        {/* Resize handles - SOLO per immagini */}
-        {item.mediaFile.type === 'image' && (
+        {/* Resize handles - SOLO per immagini e non durante drag multiplo */}
+        {item.mediaFile.type === 'image' && !isPartOfDrag && (
           <>
             <div
               className="absolute left-0 top-0 w-1 h-full cursor-ew-resize opacity-0 group-hover:opacity-100 bg-white/50"
@@ -771,6 +857,12 @@ export const Timeline = ({
         <div className="p-2 h-full flex items-center justify-between text-white text-xs overflow-hidden select-none">
           <span className="truncate flex-1 select-none">{item.mediaFile.name}</span>
           <span className="ml-2 font-mono select-none">{formatTime(item.duration)}</span>
+          {/* Indicatore di drag multiplo */}
+          {isPartOfDrag && selectedItems.size > 1 && (
+            <div className="absolute -top-1 -right-1 bg-blue-500 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center">
+              {selectedItems.size}
+            </div>
+          )}
         </div>
       </div>
     );
