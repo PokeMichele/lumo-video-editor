@@ -3,7 +3,7 @@ import { Card } from "@/components/ui/card";
 import { TimelineItem } from "./VideoEditor";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
-import { Copy, Scissors, Trash2, Plus } from "lucide-react";
+import { Copy, Scissors, Trash2 } from "lucide-react";
 
 interface TimelineProps {
   items: TimelineItem[];
@@ -12,6 +12,13 @@ interface TimelineProps {
   onItemsChange: (items: TimelineItem[]) => void;
   onItemsChangeWithHistory: (items: TimelineItem[]) => void;
   totalDuration: number;
+}
+
+interface Track {
+  id: string;
+  type: 'video' | 'audio';
+  index: number;
+  label: string;
 }
 
 // Throttle function per limitare la frequenza delle chiamate
@@ -46,20 +53,18 @@ export const Timeline = ({
   const [resizing, setResizing] = useState<{ itemId: string; edge: 'left' | 'right' } | null>(null);
   const [scrollLeft, setScrollLeft] = useState(0);
   
-  // Stati per le tracce dinamiche
-  const [tracks, setTracks] = useState<{
-    video: number[];
-    audio: number[];
-  }>({
-    video: [0],
-    audio: [1, 2]
-  });
-  
   // Stati per la selezione multipla
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [isSelecting, setIsSelecting] = useState(false);
   const [selectionStart, setSelectionStart] = useState<{ x: number; y: number } | null>(null);
   const [selectionEnd, setSelectionEnd] = useState<{ x: number; y: number } | null>(null);
+  
+  // Sistema di tracce dinamiche
+  const [tracks, setTracks] = useState<Track[]>([
+    { id: 'video-0', type: 'video', index: 0, label: 'Video 1' },
+    { id: 'audio-0', type: 'audio', index: 1, label: 'Audio 1' },
+    { id: 'audio-1', type: 'audio', index: 2, label: 'Audio 2' }
+  ]);
   
   // Stati per il magnetic snap
   const [snapThreshold] = useState(15); // pixels per il snap
@@ -86,12 +91,9 @@ export const Timeline = ({
     }[];
   } | null>(null);
 
-  // Calcola tutte le tracce disponibili
-  const allTracks = [...tracks.video, ...tracks.audio].sort((a, b) => a - b);
-  const maxTrack = Math.max(...allTracks, 2);
-
-  // Calcola l'altezza dinamica della timeline
-  const timelineHeight = (allTracks.length + 1) * 60 + 16; // +1 per buffer, +16 per padding
+  // Limiti per lo zoom
+  const minScale = 10;
+  const maxScale = 200;
 
   // Zoom functionality con Ctrl+Scroll
   useEffect(() => {
@@ -132,6 +134,9 @@ export const Timeline = ({
     ...items.map(item => (item.startTime + item.duration) * scale + 100)
   );
   const playheadPosition = currentTime * scale;
+  
+  // Calcola l'altezza totale della timeline basata sul numero di tracce
+  const timelineHeight = tracks.length * 60 + 16; // 60px per traccia + padding
 
   // Apply dark scrollbar styles
   useEffect(() => {
@@ -292,20 +297,92 @@ export const Timeline = ({
     return null;
   }, [scale, snapThreshold]);
 
-  // Validate track compatibility
-  const isValidTrack = useCallback((track: number, mediaType: string) => {
-    if (!allTracks.includes(track)) return false;
-    
-    const trackType = getTrackType(track);
+  // Validate track compatibility con sistema dinamico
+  const isValidTrack = useCallback((trackIndex: number, mediaType: string) => {
+    const track = tracks.find(t => t.index === trackIndex);
+    if (!track) return false;
     
     if (mediaType === 'video' || mediaType === 'image') {
-      return trackType === 'video';
+      return track.type === 'video';
     }
     if (mediaType === 'audio') {
-      return trackType === 'audio';
+      return track.type === 'audio';
     }
     return false;
-  }, [allTracks, getTrackType]);
+  }, [tracks]);
+
+  // Aggiungi nuova traccia
+  const addTrack = useCallback((type: 'video' | 'audio', afterIndex: number) => {
+    const newTracks = [...tracks];
+    
+    // Trova tutte le tracce dello stesso tipo
+    const sameTypeTracks = newTracks.filter(t => t.type === type);
+    const tracksOfOtherType = newTracks.filter(t => t.type !== type);
+    
+    // Calcola il nuovo indice (dove inserire fisicamente la traccia)
+    const insertIndex = afterIndex + 1;
+    
+    // Sposta tutti gli indici delle tracce successive
+    newTracks.forEach(track => {
+      if (track.index >= insertIndex) {
+        track.index += 1;
+      }
+    });
+    
+    // Aggiorna gli elementi nella timeline spostando le tracce successive
+    const updatedItems = items.map(item => {
+      if (item.track >= insertIndex) {
+        return { ...item, track: item.track + 1 };
+      }
+      return item;
+    });
+    
+    // Crea la nuova traccia
+    const newTrackId = `${type}-${Date.now()}`;
+    const newTrack: Track = {
+      id: newTrackId,
+      type,
+      index: insertIndex,
+      label: `${type === 'video' ? 'Video' : 'Audio'} ${sameTypeTracks.length + 1}`
+    };
+    
+    // Rinumera le etichette delle tracce dello stesso tipo
+    const updatedTracks = [...newTracks, newTrack]
+      .sort((a, b) => a.index - b.index)
+      .map(track => {
+        if (track.type === type) {
+          const sameTypeTracksOrdered = newTracks
+            .filter(t => t.type === type && t.index <= track.index)
+            .sort((a, b) => a.index - b.index);
+          
+          const trackNumber = sameTypeTracksOrdered.findIndex(t => t.index === track.index) + 1 + 
+            (track.index >= insertIndex ? 1 : 0);
+          
+          return {
+            ...track,
+            label: `${type === 'video' ? 'Video' : 'Audio'} ${trackNumber}`
+          };
+        }
+        return track;
+      });
+    
+    // Rinumera correttamente tutte le tracce dello stesso tipo
+    let videoCounter = 1;
+    let audioCounter = 1;
+    
+    const finalTracks = updatedTracks
+      .sort((a, b) => a.index - b.index)
+      .map(track => {
+        if (track.type === 'video') {
+          return { ...track, label: `Video ${videoCounter++}` };
+        } else {
+          return { ...track, label: `Audio ${audioCounter++}` };
+        }
+      });
+    
+    setTracks(finalTracks);
+    onItemsChangeWithHistory(updatedItems);
+  }, [tracks, items, onItemsChangeWithHistory]);
 
   // Calcola gli elementi dentro il rettangolo di selezione
   const getItemsInSelectionRect = useCallback(() => {
@@ -460,7 +537,7 @@ export const Timeline = ({
           originalStartTime: targetItem.startTime,
           originalTrack: targetItem.track,
           timeOffset: targetItem.startTime - item.startTime, // Offset rispetto all'elemento principale
-          trackOffset: allTracks.indexOf(targetItem.track) - allTracks.indexOf(item.track) // Offset di indice track rispetto all'elemento principale
+          trackOffset: targetItem.track - item.track // Offset di track rispetto all'elemento principale
         };
       }).filter(Boolean) as {
         id: string;
@@ -478,9 +555,9 @@ export const Timeline = ({
         startX: mouseX,
         startY: mouseY,
         originalStartTime: item.startTime,
-        originalTrack: allTracks.indexOf(item.track), // Usa indice invece del numero
+        originalTrack: item.track,
         currentStartTime: item.startTime,
-        currentTrack: allTracks.indexOf(item.track), // Usa indice invece del numero
+        currentTrack: item.track,
         snapPoints,
         isInSnapRange: false,
         draggedItems: draggedItemsData
@@ -632,15 +709,14 @@ export const Timeline = ({
 
         // Calcola nuova posizione senza snap
         const rawNewTime = Math.max(0, dragState.originalStartTime + deltaX / scale);
-        const newTrackIndex = Math.max(0, Math.min(allTracks.length - 1, dragState.originalTrack + Math.round(deltaY / 60)));
-        const newTrack = allTracks[newTrackIndex];
+        const newTrack = Math.max(0, Math.min(tracks.length - 1, dragState.originalTrack + Math.round(deltaY / 60)));
 
         const draggedItemData = items.find(i => i.id === draggedItem);
         if (!draggedItemData) return;
 
         // Aggiorna i punti di snap se cambia track
         let currentSnapPoints = dragState.snapPoints;
-        if (newTrackIndex !== dragState.currentTrack) {
+        if (newTrack !== dragState.currentTrack) {
           currentSnapPoints = calculateSnapPoints(draggedItem, newTrack);
         }
 
@@ -662,7 +738,7 @@ export const Timeline = ({
         setDragState(prev => prev ? {
           ...prev,
           currentStartTime: finalTime,
-          currentTrack: newTrackIndex,
+          currentTrack: newTrack,
           snapPoints: currentSnapPoints,
           potentialSnapTime: potentialSnap?.snapTime,
           isInSnapRange
@@ -689,23 +765,20 @@ export const Timeline = ({
               } else {
                 // Elemento secondario - calcola posizione relativa
                 const newItemTime = finalTime + draggedItemInfo.timeOffset;
-                const originalTrackIndex = allTracks.indexOf(draggedItemInfo.originalTrack);
-                const trackIndexOffset = newTrackIndex - dragState.originalTrack;
-                const newItemTrackIndex = originalTrackIndex + trackIndexOffset;
-                
+                const newItemTrack = newTrack + draggedItemInfo.trackOffset;
+
                 // Verifica se la nuova posizione è valida
-                if (newItemTime >= 0 && newItemTrackIndex >= 0 && newItemTrackIndex < allTracks.length) {
-                  const newItemTrack = allTracks[newItemTrackIndex];
-                  if (isValidTrack(newItemTrack, item.mediaFile.type)) {
-                    return {
-                      ...item,
-                      startTime: newItemTime,
-                      track: newItemTrack
-                    };
-                  }
+                if (newItemTime >= 0 && newItemTrack >= 0 && newItemTrack < tracks.length && 
+                    isValidTrack(newItemTrack, item.mediaFile.type)) {
+                  return {
+                    ...item,
+                    startTime: newItemTime,
+                    track: newItemTrack
+                  };
+                } else {
+                  // Se la posizione non è valida, mantieni quella originale
+                  return item;
                 }
-                // Se la posizione non è valida, mantieni quella originale
-                return item;
               }
             }
             return item;
@@ -740,46 +813,41 @@ export const Timeline = ({
 
               if (item.id === draggedItem) {
                 // Elemento principale
-                const finalTrack = allTracks[dragState.currentTrack];
-                if (isValidTrack(finalTrack, draggedItemData.mediaFile.type)) {
+                if (isValidTrack(dragState.currentTrack, draggedItemData.mediaFile.type)) {
                   return {
                     ...item,
                     startTime: finalTime,
-                    track: finalTrack
+                    track: dragState.currentTrack
                   };
                 } else {
                   // Track non valido, ripristina posizione originale
-                  const originalTrack = allTracks[dragState.originalTrack];
                   return {
                     ...item,
                     startTime: dragState.originalStartTime,
-                    track: originalTrack
+                    track: dragState.originalTrack
                   };
                 }
               } else {
                 // Elemento secondario - calcola posizione finale relativa
                 const newItemTime = finalTime + draggedItemInfo.timeOffset;
-                const originalTrackIndex = allTracks.indexOf(draggedItemInfo.originalTrack);
-                const trackIndexOffset = dragState.currentTrack - dragState.originalTrack;
-                const newItemTrackIndex = originalTrackIndex + trackIndexOffset;
+                const newItemTrack = dragState.currentTrack + draggedItemInfo.trackOffset;
 
                 // Verifica se la nuova posizione è valida
-                if (newItemTime >= 0 && newItemTrackIndex >= 0 && newItemTrackIndex < allTracks.length) {
-                  const newItemTrack = allTracks[newItemTrackIndex];
-                  if (isValidTrack(newItemTrack, item.mediaFile.type)) {
-                    return {
-                      ...item,
-                      startTime: newItemTime,
-                      track: newItemTrack
-                    };
-                  }
+                if (newItemTime >= 0 && newItemTrack >= 0 && newItemTrack < tracks.length && 
+                    isValidTrack(newItemTrack, item.mediaFile.type)) {
+                  return {
+                    ...item,
+                    startTime: newItemTime,
+                    track: newItemTrack
+                  };
+                } else {
+                  // Se la posizione non è valida, ripristina quella originale
+                  return {
+                    ...item,
+                    startTime: draggedItemInfo.originalStartTime,
+                    track: draggedItemInfo.originalTrack
+                  };
                 }
-                // Se la posizione non è valida, ripristina quella originale
-                return {
-                  ...item,
-                  startTime: draggedItemInfo.originalStartTime,
-                  track: draggedItemInfo.originalTrack
-                };
               }
             }
             return item;
@@ -918,8 +986,10 @@ export const Timeline = ({
     );
   };
 
-  // Group items by track
-  // Rimosso: ora usiamo allTracks direttamente
+  // Group items by track usando il sistema dinamico
+  const trackItems = tracks.map(track =>
+    items.filter(item => item.track === track.index)
+  );
 
   return (
     <div className="h-full flex flex-col bg-timeline-bg">
@@ -982,44 +1052,25 @@ export const Timeline = ({
       <div className="flex-1 relative overflow-hidden">
         {/* Track Labels */}
         <div className="absolute left-0 top-0 w-20 h-full bg-secondary/50 border-r border-border z-20">
-          {allTracks.map((trackNumber, index) => {
-            const trackType = getTrackType(trackNumber);
-            const trackName = getTrackName(trackNumber);
-            const isLastVideoTrack = trackType === 'video' && trackNumber === tracks.video[tracks.video.length - 1];
-            const isLastAudioTrack = trackType === 'audio' && trackNumber === tracks.audio[tracks.audio.length - 1];
-            
-            return (
-              <div key={trackNumber}>
-                <div
-                  className="absolute w-full h-14 flex flex-col items-center justify-center text-xs font-medium text-muted-foreground border-b border-border/30"
-                  style={{ top: `${index * 60 + 8}px` }}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    if (copiedItems.length > 0 || copiedItem) {
-                      if (copiedItems.length > 0) {
-                        handlePaste(trackNumber);
-                      } else if (copiedItem && isValidTrack(trackNumber, copiedItem.mediaFile.type)) {
-                        handlePaste(trackNumber);
-                      }
-                    }
-                  }}
-                >
-                  <span className="text-center">{trackName}</span>
-                  
-                  {/* Pulsante + per aggiungere tracce */}
-                  {(isLastVideoTrack || isLastAudioTrack) && (
-                    <button
-                      onClick={trackType === 'video' ? addVideoTrack : addAudioTrack}
-                      className="mt-1 w-5 h-5 bg-primary/20 hover:bg-primary/40 text-primary rounded-full flex items-center justify-center transition-colors"
-                      title={`Aggiungi traccia ${trackType === 'video' ? 'video' : 'audio'}`}
-                    >
-                      <Plus className="w-3 h-3" />
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+          {['Video', 'Audio 1', 'Audio 2'].map((label, index) => (
+            <div
+              key={label}
+              className="absolute w-full h-14 flex items-center justify-center text-xs font-medium text-muted-foreground border-b border-border/30"
+              style={{ top: `${index * 60 + 8}px` }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                if (copiedItems.length > 0 || copiedItem) {
+                  if (copiedItems.length > 0) {
+                    handlePaste(index);
+                  } else if (copiedItem && isValidTrack(index, copiedItem.mediaFile.type)) {
+                    handlePaste(index);
+                  }
+                }
+              }}
+            >
+              {label}
+            </div>
+          ))}
         </div>
 
         {/* Timeline Content */}
@@ -1034,26 +1085,21 @@ export const Timeline = ({
           }}
         >
           <div
-            className="relative"
-            style={{ width: `${timelineWidth}px`, height: `${timelineHeight}px` }}
+            className="relative h-48"
+            style={{ width: `${timelineWidth}px` }}
           >
             {/* Track Backgrounds */}
-            {allTracks.map((trackNumber, index) => (
+            {[0, 1, 2].map(track => (
               <div
-                key={trackNumber}
+                key={track}
                 className="absolute w-full h-14 border-b border-border/30"
-                style={{ top: `${index * 60 + 8}px` }}
+                style={{ top: `${track * 60 + 8}px` }}
               />
             ))}
 
             {/* Timeline Items */}
-            {allTracks.map((trackNumber) =>
-              items
-                .filter(item => item.track === trackNumber)
-                .map(item => {
-                  const trackIndex = allTracks.indexOf(item.track);
-                  return renderTimelineItem(item, trackIndex);
-                })
+            {trackItems.map((trackItems, trackIndex) =>
+              trackItems.map(item => renderTimelineItem(item, trackIndex))
             )}
 
             {/* Grid Lines */}
