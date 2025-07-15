@@ -373,15 +373,11 @@ export const Timeline = ({
     });
   };
 
-  // FIXED: Throttled update function with better synchronization
+  // FIXED: Simplified throttled update - no more dual updates during drag
   const throttledUpdateItems = useCallback(
-    throttle((updatedItems: TimelineItem[], preview: typeof dragPreview) => {
+    throttle((updatedItems: TimelineItem[]) => {
       onItemsChange(updatedItems);
-      // Sync the drag preview after items update to avoid visual glitches
-      if (preview) {
-        setDragPreview({ ...preview });
-      }
-    }, 8), // Increased frequency for smoother experience
+    }, 8),
     [onItemsChange]
   );
 
@@ -502,7 +498,7 @@ export const Timeline = ({
             dragStateRef.current.startTrack = newTrack;
           }
 
-          // FIXED: Calcola lo snap usando la durata corretta e controllo collisioni
+          // FIXED: Durante il drag, aggiorna SOLO il drag preview, NON gli items
           const snapResult = findSnapPoint(rawTime, snapPoints, dragStateRef.current.draggedItemDuration, newTrack, draggedItem);
           const finalTime = snapResult.time;
 
@@ -513,7 +509,7 @@ export const Timeline = ({
             setActiveSnapLines([]);
           }
 
-          // FIXED: Crea nuovo drag preview con dati corretti
+          // FIXED: Aggiorna SOLO il drag preview durante il trascinamento
           const newDragPreview = {
             itemId: draggedItem,
             startTime: finalTime,
@@ -522,18 +518,9 @@ export const Timeline = ({
             snapLineTime: snapResult.snapLine
           };
 
-          // Update drag preview immediately for visual feedback
           setDragPreview(newDragPreview);
 
-          // FIXED: Update items with consistent data
-          const updatedItems = items.map(item =>
-            item.id === draggedItem
-              ? { ...item, startTime: finalTime, track: newTrack }
-              : item
-          );
-          
-          // Use throttled update but pass the preview for synchronization
-          throttledUpdateItems(updatedItems, newDragPreview);
+          // NON aggiornare gli items durante il drag - solo il preview!
         } else {
           // Track non valido - mantieni posizione ma senza snapping
           const newDragPreview = {
@@ -550,11 +537,31 @@ export const Timeline = ({
     };
 
     const handleMouseUp = () => {
+      // FIXED: Applica le modifiche dal drag preview agli items effettivi
+      if (isDragging && draggedItem && dragPreview) {
+        const updatedItems = items.map(item =>
+          item.id === draggedItem
+            ? { ...item, startTime: dragPreview.startTime, track: dragPreview.track }
+            : item
+        );
+        onItemsChange(updatedItems);
+      }
+
       // Save to history only when drag/resize ends
       if ((isDragging || resizing) && initialItemsForDrag) {
-        const hasChanges = JSON.stringify(items) !== JSON.stringify(initialItemsForDrag);
+        // Per il drag, usa gli items aggiornati con il drag preview
+        let finalItems = items;
+        if (isDragging && draggedItem && dragPreview) {
+          finalItems = items.map(item =>
+            item.id === draggedItem
+              ? { ...item, startTime: dragPreview.startTime, track: dragPreview.track }
+              : item
+          );
+        }
+        
+        const hasChanges = JSON.stringify(finalItems) !== JSON.stringify(initialItemsForDrag);
         if (hasChanges) {
-          onItemsChangeWithHistory(items);
+          onItemsChangeWithHistory(finalItems);
         }
       }
 
