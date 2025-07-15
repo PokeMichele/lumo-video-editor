@@ -40,10 +40,17 @@ export const Timeline = ({
   const [draggedItem, setDraggedItem] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [scale, setScale] = useState(50); // pixels per second
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; itemId: string } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; itemId?: string; selectedItems?: string[] } | null>(null);
   const [copiedItem, setCopiedItem] = useState<TimelineItem | null>(null);
+  const [copiedItems, setCopiedItems] = useState<TimelineItem[]>([]); // Per copia multipla
   const [resizing, setResizing] = useState<{ itemId: string; edge: 'left' | 'right' } | null>(null);
   const [scrollLeft, setScrollLeft] = useState(0);
+  
+  // Stati per la selezione multipla
+  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+  const [isSelecting, setIsSelecting] = useState(false);
+  const [selectionStart, setSelectionStart] = useState<{ x: number; y: number } | null>(null);
+  const [selectionEnd, setSelectionEnd] = useState<{ x: number; y: number } | null>(null);
   
   // Stati per il magnetic snap
   const [snapThreshold] = useState(15); // pixels per il snap
@@ -149,7 +156,7 @@ export const Timeline = ({
 
   // Handle timeline click to change time
   const handleTimelineClick = (e: React.MouseEvent) => {
-    if (!isDragging && !resizing && !draggedItem) {
+    if (!isDragging && !resizing && !draggedItem && !isSelecting) {
       const mouseX = e.clientX - 80 + scrollLeft;
       const newTime = mouseX / scale;
       onTimeChange(Math.max(0, Math.min(newTime, totalDuration)));
@@ -273,14 +280,54 @@ export const Timeline = ({
     return false;
   }, []);
 
+  // Calcola gli elementi dentro il rettangolo di selezione
+  const getItemsInSelectionRect = useCallback(() => {
+    if (!selectionStart || !selectionEnd) return [];
+
+    const left = Math.min(selectionStart.x, selectionEnd.x);
+    const right = Math.max(selectionStart.x, selectionEnd.x);
+    const top = Math.min(selectionStart.y, selectionEnd.y);
+    const bottom = Math.max(selectionStart.y, selectionEnd.y);
+
+    return items.filter(item => {
+      const itemLeft = item.startTime * scale;
+      const itemRight = itemLeft + item.duration * scale;
+      const itemTop = item.track * 60 + 8;
+      const itemBottom = itemTop + 48; // altezza elemento
+
+      // Controlla se c'è sovrapposizione
+      return !(itemRight < left || itemLeft > right || itemBottom < top || itemTop > bottom);
+    });
+  }, [selectionStart, selectionEnd, items, scale]);
+
   // Handle context menu actions
-  const handleCopy = (item: TimelineItem) => {
-    setCopiedItem({ ...item, id: `${item.id}_copy` });
+  const handleCopy = (item?: TimelineItem) => {
+    if (selectedItems.size > 1) {
+      // Copia multipla
+      const itemsToCopy = items.filter(i => selectedItems.has(i.id));
+      setCopiedItems(itemsToCopy.map(i => ({ ...i, id: `${i.id}_copy` })));
+      setCopiedItem(null);
+    } else if (item) {
+      // Copia singola
+      setCopiedItem({ ...item, id: `${item.id}_copy` });
+      setCopiedItems([]);
+    }
     setContextMenu(null);
   };
 
   const handlePaste = (track: number) => {
-    if (copiedItem) {
+    if (copiedItems.length > 0) {
+      // Incolla multiplo
+      const newItems = copiedItems.map(copiedItem => ({
+        ...copiedItem,
+        id: `${copiedItem.id}_${Date.now()}_${Math.random()}`,
+        track: isValidTrack(track, copiedItem.mediaFile.type) ? track : copiedItem.track,
+        startTime: currentTime,
+        mediaStartOffset: copiedItem.mediaStartOffset || 0
+      }));
+      onItemsChangeWithHistory([...items, ...newItems]);
+    } else if (copiedItem) {
+      // Incolla singolo
       const newItem = {
         ...copiedItem,
         id: `${copiedItem.id}_${Date.now()}`,
@@ -317,44 +364,106 @@ export const Timeline = ({
     setContextMenu(null);
   };
 
-  const handleDelete = (itemId: string) => {
-    onItemsChangeWithHistory(items.filter(item => item.id !== itemId));
+  const handleDelete = (itemId?: string) => {
+    if (selectedItems.size > 1) {
+      // Eliminazione multipla
+      const newItems = items.filter(item => !selectedItems.has(item.id));
+      onItemsChangeWithHistory(newItems);
+      setSelectedItems(new Set());
+    } else if (itemId) {
+      // Eliminazione singola
+      onItemsChangeWithHistory(items.filter(item => item.id !== itemId));
+    }
     setContextMenu(null);
   };
 
+  // Handle item selection
+  const handleItemClick = (e: React.MouseEvent, item: TimelineItem) => {
+    if (e.ctrlKey || e.metaKey) {
+      // Ctrl+Click: aggiungi/rimuovi dalla selezione
+      e.preventDefault();
+      e.stopPropagation();
+      
+      setSelectedItems(prev => {
+        const newSelection = new Set(prev);
+        if (newSelection.has(item.id)) {
+          newSelection.delete(item.id);
+        } else {
+          newSelection.add(item.id);
+        }
+        return newSelection;
+      });
+    } else {
+      // Click normale: seleziona solo questo elemento
+      setSelectedItems(new Set([item.id]));
+    }
+  };
+
   // Handle drag start
-  const handleMouseDown = (e: React.MouseEvent, item: TimelineItem, isResize?: 'left' | 'right') => {
+  const handleMouseDown = (e: React.MouseEvent, item?: TimelineItem, isResize?: 'left' | 'right') => {
     e.preventDefault();
     e.stopPropagation();
 
-    if (isResize) {
+    if (isResize && item) {
       setResizing({ itemId: item.id, edge: isResize });
       return;
     }
 
-    const rect = timelineContentRef.current?.getBoundingClientRect();
-    if (!rect) return;
+    if (item) {
+      // Drag di un elemento
+      const rect = timelineContentRef.current?.getBoundingClientRect();
+      if (!rect) return;
 
-    const mouseX = e.clientX - rect.left + scrollLeft;
-    const mouseY = e.clientY - rect.top;
+      const mouseX = e.clientX - rect.left + scrollLeft;
+      const mouseY = e.clientY - rect.top;
 
-    // Calcola i punti di snap per la track corrente
-    const snapPoints = calculateSnapPoints(item.id, item.track);
+      // Se l'elemento non è selezionato e non si tiene Ctrl, selezionalo
+      if (!selectedItems.has(item.id) && !(e.ctrlKey || e.metaKey)) {
+        setSelectedItems(new Set([item.id]));
+      }
 
-    // Stato del drag con snap
-    setDragState({
-      startX: mouseX,
-      startY: mouseY,
-      originalStartTime: item.startTime,
-      originalTrack: item.track,
-      currentStartTime: item.startTime,
-      currentTrack: item.track,
-      snapPoints,
-      isInSnapRange: false
-    });
+      // Calcola i punti di snap per la track corrente
+      const snapPoints = calculateSnapPoints(item.id, item.track);
 
-    setIsDragging(true);
-    setDraggedItem(item.id);
+      // Stato del drag con snap
+      setDragState({
+        startX: mouseX,
+        startY: mouseY,
+        originalStartTime: item.startTime,
+        originalTrack: item.track,
+        currentStartTime: item.startTime,
+        currentTrack: item.track,
+        snapPoints,
+        isInSnapRange: false
+      });
+
+      setIsDragging(true);
+      setDraggedItem(item.id);
+    } else {
+      // Inizio selezione rettangolare
+      const rect = timelineContentRef.current?.getBoundingClientRect();
+      if (!rect) return;
+
+      const mouseX = e.clientX - rect.left + scrollLeft;
+      const mouseY = e.clientY - rect.top;
+
+      setIsSelecting(true);
+      setSelectionStart({ x: mouseX, y: mouseY });
+      setSelectionEnd({ x: mouseX, y: mouseY });
+
+      // Pulisci selezione se non si tiene Ctrl
+      if (!(e.ctrlKey || e.metaKey)) {
+        setSelectedItems(new Set());
+      }
+    }
+  };
+
+  // Handle selezione rettangolare sulla timeline vuota
+  const handleTimelineMouseDown = (e: React.MouseEvent) => {
+    // Solo se clicca su area vuota (non su elementi)
+    if (!isDragging && !resizing) {
+      handleMouseDown(e);
+    }
   };
 
   // Handle mouse move con snap magnetico
@@ -363,7 +472,33 @@ export const Timeline = ({
       if (!timelineContentRef.current) return;
       const rect = timelineContentRef.current.getBoundingClientRect();
 
-      if (resizing) {
+      if (isSelecting && selectionStart) {
+        // Aggiorna selezione rettangolare
+        const mouseX = e.clientX - rect.left + scrollLeft;
+        const mouseY = e.clientY - rect.top;
+        
+        setSelectionEnd({ x: mouseX, y: mouseY });
+
+        // Calcola elementi nella selezione in tempo reale
+        const itemsInRect = getItemsInSelectionRect();
+        const newSelection = new Set(selectedItems);
+        
+        itemsInRect.forEach(item => {
+          if (e.ctrlKey || e.metaKey) {
+            // Con Ctrl: toggle
+            if (selectedItems.has(item.id)) {
+              newSelection.delete(item.id);
+            } else {
+              newSelection.add(item.id);
+            }
+          } else {
+            // Senza Ctrl: aggiungi
+            newSelection.add(item.id);
+          }
+        });
+
+        setSelectedItems(newSelection);
+      } else if (resizing) {
         // Logica di resize con snap
         const mouseX = e.clientX - rect.left + scrollLeft;
         const newTime = mouseX / scale;
@@ -504,7 +639,12 @@ export const Timeline = ({
     };
 
     const handleMouseUp = () => {
-      if (isDragging && draggedItem && dragState) {
+      if (isSelecting) {
+        // Fine selezione rettangolare
+        setIsSelecting(false);
+        setSelectionStart(null);
+        setSelectionEnd(null);
+      } else if (isDragging && draggedItem && dragState) {
         // Al rilascio: applica lo snap solo se siamo dentro la soglia
         const draggedItemData = items.find(i => i.id === draggedItem);
         if (draggedItemData) {
@@ -548,7 +688,7 @@ export const Timeline = ({
       setActiveSnapLines([]);
     };
 
-    if (isDragging || resizing) {
+    if (isDragging || resizing || isSelecting) {
       document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('mouseup', handleMouseUp);
     }
@@ -557,12 +697,14 @@ export const Timeline = ({
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDragging, draggedItem, dragState, resizing, items, scale, scrollLeft, 
-      calculateSnapPoints, findPotentialSnapPoint, isValidTrack, onItemsChange, onItemsChangeWithHistory]);
+  }, [isDragging, draggedItem, dragState, resizing, isSelecting, selectionStart, items, scale, scrollLeft, 
+      calculateSnapPoints, findPotentialSnapPoint, isValidTrack, onItemsChange, onItemsChangeWithHistory, 
+      selectedItems, getItemsInSelectionRect]);
 
   // Render timeline item
   const renderTimelineItem = (item: TimelineItem, track: number) => {
     const isDraggedItem = draggedItem === item.id;
+    const isSelected = selectedItems.has(item.id);
     
     const left = item.startTime * scale;
     const width = item.duration * scale;
@@ -577,9 +719,11 @@ export const Timeline = ({
     return (
       <div
         key={item.id}
-        className={`absolute h-12 rounded border-2 border-white/20 cursor-move transition-none group
+        className={`absolute h-12 rounded border-2 cursor-move transition-none group
           ${trackColors[item.mediaFile.type]} ${
           isDraggedItem ? 'z-30 opacity-80 shadow-lg' : 'z-10'
+        } ${
+          isSelected ? 'border-yellow-400 ring-2 ring-yellow-400/50' : 'border-white/20'
         }`}
         style={{
           left: `${left}px`,
@@ -587,10 +731,27 @@ export const Timeline = ({
           top: `${topPosition}px`,
           transform: isDraggedItem ? 'scale(1.02)' : 'none'
         }}
-        onMouseDown={(e) => handleMouseDown(e, item)}
+        onMouseDown={(e) => {
+          // Se clicca con Ctrl, gestisci la selezione
+          if (e.ctrlKey || e.metaKey) {
+            handleItemClick(e, item);
+          } else {
+            handleMouseDown(e, item);
+          }
+        }}
         onContextMenu={(e) => {
           e.preventDefault();
-          setContextMenu({ x: e.clientX, y: e.clientY, itemId: item.id });
+          if (selectedItems.size > 1 && selectedItems.has(item.id)) {
+            // Context menu per selezione multipla
+            setContextMenu({ 
+              x: e.clientX, 
+              y: e.clientY, 
+              selectedItems: Array.from(selectedItems) 
+            });
+          } else {
+            // Context menu per elemento singolo
+            setContextMenu({ x: e.clientX, y: e.clientY, itemId: item.id });
+          }
         }}
       >
         {/* Resize handles - SOLO per immagini */}
@@ -615,6 +776,28 @@ export const Timeline = ({
     );
   };
 
+  // Render selection rectangle
+  const renderSelectionRect = () => {
+    if (!isSelecting || !selectionStart || !selectionEnd) return null;
+
+    const left = Math.min(selectionStart.x, selectionEnd.x);
+    const top = Math.min(selectionStart.y, selectionEnd.y);
+    const width = Math.abs(selectionEnd.x - selectionStart.x);
+    const height = Math.abs(selectionEnd.y - selectionStart.y);
+
+    return (
+      <div
+        className="absolute pointer-events-none z-50 border border-yellow-400 bg-yellow-400/20"
+        style={{
+          left: `${left}px`,
+          top: `${top}px`,
+          width: `${width}px`,
+          height: `${height}px`
+        }}
+      />
+    );
+  };
+
   // Group items by track
   const trackItems = [0, 1, 2].map(trackIndex =>
     items.filter(item => item.track === trackIndex)
@@ -626,6 +809,11 @@ export const Timeline = ({
       <div className="absolute top-2 right-4 z-40 bg-black/50 text-white text-xs px-2 py-1 rounded backdrop-blur-sm">
         Zoom: {Math.round((scale / 50) * 100)}%
         <div className="text-[10px] text-gray-400 mt-1">Ctrl+Scroll per zoom</div>
+        {selectedItems.size > 0 && (
+          <div className="text-[10px] text-yellow-400 mt-1">
+            {selectedItems.size} elementi selezionati
+          </div>
+        )}
       </div>
 
       {/* Timeline Header with Time Markers */}
@@ -683,8 +871,10 @@ export const Timeline = ({
               style={{ top: `${index * 60 + 8}px` }}
               onContextMenu={(e) => {
                 e.preventDefault();
-                if (copiedItem) {
-                  if (isValidTrack(index, copiedItem.mediaFile.type)) {
+                if (copiedItems.length > 0 || copiedItem) {
+                  if (copiedItems.length > 0) {
+                    handlePaste(index);
+                  } else if (copiedItem && isValidTrack(index, copiedItem.mediaFile.type)) {
                     handlePaste(index);
                   }
                 }
@@ -700,6 +890,7 @@ export const Timeline = ({
           className="ml-20 relative h-full overflow-x-auto overflow-y-hidden"
           onScroll={handleTimelineContentScroll}
           ref={timelineContentRef}
+          onMouseDown={handleTimelineMouseDown}
           style={{
             scrollbarWidth: 'thin',
             scrollbarColor: '#374151 #1f2937'
@@ -745,6 +936,9 @@ export const Timeline = ({
                 style={{ left: `${snapTime * scale}px` }}
               />
             ))}
+
+            {/* Selection Rectangle */}
+            {renderSelectionRect()}
           </div>
         </div>
       </div>
@@ -761,33 +955,50 @@ export const Timeline = ({
             size="sm"
             className="w-full justify-start px-3 py-1.5 h-auto text-xs"
             onClick={() => {
-              const item = items.find(i => i.id === contextMenu.itemId);
-              if (item) handleCopy(item);
+              if (contextMenu.selectedItems && contextMenu.selectedItems.length > 1) {
+                // Copia multipla
+                handleCopy();
+              } else if (contextMenu.itemId) {
+                // Copia singola
+                const item = items.find(i => i.id === contextMenu.itemId);
+                if (item) handleCopy(item);
+              }
             }}
           >
             <Copy className="w-3 h-3 mr-2" />
-            Copy
+            {contextMenu.selectedItems ? `Copy ${contextMenu.selectedItems.length} items` : 'Copy'}
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full justify-start px-3 py-1.5 h-auto text-xs"
-            onClick={() => {
-              const item = items.find(i => i.id === contextMenu.itemId);
-              if (item) handleSplit(item);
-            }}
-          >
-            <Scissors className="w-3 h-3 mr-2" />
-            Split
-          </Button>
+          
+          {/* Split solo per elemento singolo */}
+          {contextMenu.itemId && !contextMenu.selectedItems && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start px-3 py-1.5 h-auto text-xs"
+              onClick={() => {
+                const item = items.find(i => i.id === contextMenu.itemId);
+                if (item) handleSplit(item);
+              }}
+            >
+              <Scissors className="w-3 h-3 mr-2" />
+              Split
+            </Button>
+          )}
+          
           <Button
             variant="ghost"
             size="sm"
             className="w-full justify-start px-3 py-1.5 h-auto text-xs text-destructive hover:text-destructive"
-            onClick={() => handleDelete(contextMenu.itemId)}
+            onClick={() => {
+              if (contextMenu.selectedItems) {
+                handleDelete();
+              } else {
+                handleDelete(contextMenu.itemId);
+              }
+            }}
           >
             <Trash2 className="w-3 h-3 mr-2" />
-            Delete
+            {contextMenu.selectedItems ? `Delete ${contextMenu.selectedItems.length} items` : 'Delete'}
           </Button>
         </div>
       )}
