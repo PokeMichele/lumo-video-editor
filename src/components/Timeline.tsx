@@ -60,6 +60,10 @@ export const Timeline = ({
     snapLineTime?: number;
   } | null>(null);
 
+  // Limiti per lo zoom
+  const minScale = 10; // minimo zoom out
+  const maxScale = 200; // massimo zoom in
+
   const dragStateRef = useRef<{
     isDragging: boolean;
     startX: number;
@@ -77,6 +81,46 @@ export const Timeline = ({
     snapPoints: [],
     draggedItemDuration: 0
   });
+
+  // Zoom functionality con Ctrl+Scroll
+  useEffect(() => {
+    const handleWheel = (e: WheelEvent) => {
+      // Solo se Ctrl è premuto
+      if (e.ctrlKey) {
+        e.preventDefault(); // Previeni il zoom della pagina
+        
+        const zoomFactor = 1.1; // Fattore di zoom
+        const delta = e.deltaY;
+        
+        setScale(prevScale => {
+          let newScale;
+          if (delta < 0) {
+            // Scroll up = Zoom In (aumenta scale)
+            newScale = prevScale * zoomFactor;
+          } else {
+            // Scroll down = Zoom Out (diminuisci scale)
+            newScale = prevScale / zoomFactor;
+          }
+          
+          // Applica i limiti
+          return Math.max(minScale, Math.min(maxScale, newScale));
+        });
+      }
+    };
+
+    // Aggiungi l'event listener alla timeline content
+    const timelineElement = timelineContentRef.current;
+    if (timelineElement) {
+      timelineElement.addEventListener('wheel', handleWheel, { passive: false });
+    }
+
+    // Cleanup
+    return () => {
+      if (timelineElement) {
+        timelineElement.removeEventListener('wheel', handleWheel);
+      }
+    };
+  }, [minScale, maxScale]);
 
   // Calcola la larghezza effettiva della timeline in base al contenuto
   const timelineWidth = Math.max(totalDuration * scale, 1000,
@@ -139,7 +183,18 @@ export const Timeline = ({
   // Generate time markers - FIXED: Linea del timestamp 0:00 perfettamente allineata all'inizio
   const generateTimeMarkers = () => {
     const markers = [];
-    const interval = totalDuration > 60 ? 10 : 5; // 10s intervals for long videos, 5s for short
+    
+    // Calcola l'intervallo dinamicamente in base al livello di zoom
+    let interval = 5; // default
+    if (scale < 20) {
+      interval = 30; // zoom out molto
+    } else if (scale < 40) {
+      interval = 15; // zoom out
+    } else if (scale > 100) {
+      interval = 1; // zoom in molto
+    } else if (scale > 80) {
+      interval = 2; // zoom in
+    }
 
     for (let i = 0; i <= totalDuration; i += interval) {
       const position = i * scale;
@@ -693,6 +748,12 @@ export const Timeline = ({
 
   return (
     <div className="h-full flex flex-col bg-timeline-bg">
+      {/* Zoom Indicator */}
+      <div className="absolute top-2 right-4 z-40 bg-black/50 text-white text-xs px-2 py-1 rounded backdrop-blur-sm">
+        Zoom: {Math.round((scale / 50) * 100)}%
+        <div className="text-[10px] text-gray-400 mt-1">Ctrl+Scroll per zoom</div>
+      </div>
+
       {/* Timeline Header with Time Markers */}
       <div className="relative h-16 bg-gradient-timeline border-b border-border">
         <div className="absolute left-0 top-0 w-20 h-full bg-secondary/50 border-r border-border z-30 flex items-center justify-center">
@@ -789,15 +850,18 @@ export const Timeline = ({
               trackItems.map(item => renderTimelineItem(item, trackIndex))
             )}
 
-            {/* Grid Lines */}
+            {/* Grid Lines - dinamiche in base al zoom */}
             <div className="absolute inset-0 pointer-events-none">
-              {Array.from({ length: Math.ceil(totalDuration / 10) }).map((_, i) => (
-                <div
-                  key={i}
-                  className="absolute top-0 bottom-0 w-px bg-border/30"
-                  style={{ left: `${i * 10 * scale}px` }}
-                />
-              ))}
+              {Array.from({ length: Math.ceil(totalDuration / (scale > 80 ? 1 : scale > 40 ? 5 : 10)) }).map((_, i) => {
+                const interval = scale > 80 ? 1 : scale > 40 ? 5 : 10;
+                return (
+                  <div
+                    key={i}
+                    className="absolute top-0 bottom-0 w-px bg-border/30"
+                    style={{ left: `${i * interval * scale}px` }}
+                  />
+                );
+              })}
             </div>
 
             {/* FIXED: Snap Lines con maggiore visibilità */}

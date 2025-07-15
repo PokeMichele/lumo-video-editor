@@ -29,6 +29,21 @@ export const CompositeVideoPlayer = ({
   const [volume, setVolume] = useState(100);
   const [userInteracted, setUserInteracted] = useState(false);
   const lastTimeRef = useRef(currentTime);
+  const previousCurrentTimeRef = useRef(currentTime);
+
+  // FIXED: Sincronizza lastTimeRef quando currentTime cambia dall'esterno (manual seek)
+  useEffect(() => {
+    if (Math.abs(currentTime - previousCurrentTimeRef.current) > 0.1) {
+      // Se il currentTime è cambiato significativamente dall'esterno (non dall'animation loop)
+      lastTimeRef.current = currentTime;
+      previousCurrentTimeRef.current = currentTime;
+      
+      // Forza la sincronizzazione di tutti i media elements
+      forceSyncAllMedia();
+    } else {
+      previousCurrentTimeRef.current = currentTime;
+    }
+  }, [currentTime]);
 
   // Trova tutti gli elementi attivi al tempo corrente
   const getActiveItems = useCallback(() => {
@@ -37,6 +52,39 @@ export const CompositeVideoPlayer = ({
       currentTime < item.startTime + item.duration
     ).sort((a, b) => a.track - b.track); // Ordina per track (layer inferiore prima)
   }, [timelineItems, currentTime]);
+
+  // FIXED: Funzione per forzare la sincronizzazione di tutti i media
+  const forceSyncAllMedia = useCallback(() => {
+    const activeItems = getActiveItems();
+
+    // Sincronizza tutti i video
+    videoElementsRef.current.forEach((video, itemId) => {
+      const item = activeItems.find(item => item.id === itemId);
+      if (item) {
+        const relativeTime = currentTime - item.startTime;
+        const mediaOffset = item.mediaStartOffset || 0;
+        const actualVideoTime = relativeTime + mediaOffset;
+        
+        if (actualVideoTime >= 0 && actualVideoTime <= video.duration) {
+          video.currentTime = actualVideoTime;
+        }
+      }
+    });
+
+    // Sincronizza tutti gli audio
+    audioElementsRef.current.forEach((audio, itemId) => {
+      const item = activeItems.find(item => item.id === itemId);
+      if (item) {
+        const relativeTime = currentTime - item.startTime;
+        const mediaOffset = item.mediaStartOffset || 0;
+        const actualAudioTime = relativeTime + mediaOffset;
+        
+        if (actualAudioTime >= 0 && actualAudioTime <= audio.duration) {
+          audio.currentTime = actualAudioTime;
+        }
+      }
+    });
+  }, [currentTime, getActiveItems]);
 
   // Precarica e gestisce elementi media
   useEffect(() => {
@@ -61,6 +109,11 @@ export const CompositeVideoPlayer = ({
           video.addEventListener('loadedmetadata', () => {
             console.log(`Video loaded: ${item.mediaFile.name}, duration: ${video.duration}`);
           });
+
+          // FIXED: Previeni il seek automatico del video browser
+          video.addEventListener('timeupdate', (e) => {
+            e.stopPropagation();
+          });
         }
       } else if (item.mediaFile.type === 'audio' && item.mediaFile.url) {
         if (!audioElementsRef.current.has(item.id)) {
@@ -77,6 +130,11 @@ export const CompositeVideoPlayer = ({
 
           audio.addEventListener('loadedmetadata', () => {
             console.log(`Audio loaded: ${item.mediaFile.name}, duration: ${audio.duration}`);
+          });
+
+          // FIXED: Previeni il seek automatico dell'audio browser
+          audio.addEventListener('timeupdate', (e) => {
+            e.stopPropagation();
           });
         }
       } else if (item.mediaFile.type === 'image' && item.mediaFile.url) {
@@ -102,12 +160,12 @@ export const CompositeVideoPlayer = ({
         const mediaOffset = item.mediaStartOffset || 0;
         const actualVideoTime = relativeTime + mediaOffset;
 
-        // Sincronizza il tempo se necessario
-        if (Math.abs(video.currentTime - actualVideoTime) > 0.1) {
+        // FIXED: Sincronizza sempre il tempo, ma con tolleranza ridotta per evitare loop
+        if (Math.abs(video.currentTime - actualVideoTime) > 0.2) {
           video.currentTime = actualVideoTime;
         }
 
-        if (isPlaying && userInteracted) {
+        if (isPlaying && userInteracted && actualVideoTime >= 0 && actualVideoTime <= video.duration) {
           video.muted = false;
           video.volume = volume / 100;
           video.play().catch(e => {
@@ -132,12 +190,12 @@ export const CompositeVideoPlayer = ({
         const mediaOffset = item.mediaStartOffset || 0;
         const actualAudioTime = relativeTime + mediaOffset;
 
-        // Sincronizza il tempo se necessario
-        if (Math.abs(audio.currentTime - actualAudioTime) > 0.1) {
+        // FIXED: Sincronizza sempre il tempo, ma con tolleranza ridotta per evitare loop
+        if (Math.abs(audio.currentTime - actualAudioTime) > 0.2) {
           audio.currentTime = actualAudioTime;
         }
 
-        if (isPlaying && userInteracted) {
+        if (isPlaying && userInteracted && actualAudioTime >= 0 && actualAudioTime <= audio.duration) {
           audio.muted = false;
           audio.volume = volume / 100;
           audio.play().catch(e => {
@@ -362,7 +420,7 @@ export const CompositeVideoPlayer = ({
 
   }, [currentTime, timelineItems, getActiveItems, userInteracted]);
 
-  // Animation loop per il playback
+  // FIXED: Animation loop migliorato per il playback - usa sempre lastTimeRef come riferimento
   useEffect(() => {
     if (isPlaying) {
       const animate = () => {
@@ -372,6 +430,9 @@ export const CompositeVideoPlayer = ({
         onTimeUpdate(newTime);
         animationFrameRef.current = requestAnimationFrame(animate);
       };
+      
+      // FIXED: Assicurati che lastTimeRef sia sincronizzato prima di iniziare l'animazione
+      lastTimeRef.current = currentTime;
       animationFrameRef.current = requestAnimationFrame(animate);
     } else {
       if (animationFrameRef.current) {
@@ -397,15 +458,25 @@ export const CompositeVideoPlayer = ({
     if (!userInteracted) {
       setUserInteracted(true);
     }
+    
+    // FIXED: Quando si preme play, assicurati che lastTimeRef sia sincronizzato con currentTime
+    if (!isPlaying) {
+      lastTimeRef.current = currentTime;
+    }
+    
     onPlayStateChange(!isPlaying);
   };
 
   const handleSeekBackward = () => {
-    onTimeUpdate(Math.max(0, currentTime - 5));
+    const newTime = Math.max(0, currentTime - 5);
+    onTimeUpdate(newTime);
+    // lastTimeRef verrà aggiornato dal useEffect che monitora currentTime
   };
 
   const handleSeekForward = () => {
-    onTimeUpdate(currentTime + 5);
+    const newTime = currentTime + 5;
+    onTimeUpdate(newTime);
+    // lastTimeRef verrà aggiornato dal useEffect che monitora currentTime
   };
 
   const handleVolumeChange = (value: number[]) => {
