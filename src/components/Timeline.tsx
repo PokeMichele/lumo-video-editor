@@ -200,20 +200,19 @@ export const Timeline = ({
     });
   }, [items]);
 
-  // FIXED: Simplified snap logic - if snap line shows, snap immediately
+  // FIXED: Completely redesigned snap logic to eliminate visual overlaps
   const findSnapPoint = useCallback((currentTime: number, snapPoints: { time: number; type: 'start' | 'end' | 'timeline-start' }[], draggedItemDuration: number, targetTrack: number, draggedItemId: string): { 
     time: number; 
     snapped: boolean; 
     snapLine?: number; 
     showSnapLine?: boolean 
   } => {
-    const snapThresholdTime = snapThreshold / scale; // Use same threshold for both
+    const snapThresholdTime = snapThreshold / scale;
 
-    let bestSnapOption: { 
-      time: number; 
-      snapTime: number;
+    let bestSnapResult: { 
+      elementStartTime: number; // Where the element should start
+      snapLinePosition: number; // Where the yellow line appears
       distance: number;
-      snapEdge: 'start' | 'end';
     } | null = null;
 
     const draggedItemStart = currentTime;
@@ -221,52 +220,53 @@ export const Timeline = ({
 
     // Evaluate each snap point
     for (const snapPoint of snapPoints) {
-      // Option 1: Snap dragged item's START to this snap point
+      
+      // Option 1: Connect START of dragged item to this snap point
+      // Yellow line appears at snapPoint.time, element starts exactly there
       const startSnapDistance = Math.abs(draggedItemStart - snapPoint.time);
       if (startSnapDistance <= snapThresholdTime) {
-        const potentialStartTime = snapPoint.time;
+        const elementStartTime = snapPoint.time; // Element starts exactly at snap point
         
         // Check if this would cause overlap
-        if (!wouldCauseOverlap(potentialStartTime, draggedItemDuration, targetTrack, draggedItemId)) {
-          if (!bestSnapOption || startSnapDistance < bestSnapOption.distance) {
-            bestSnapOption = {
-              time: potentialStartTime,
-              snapTime: snapPoint.time,
-              distance: startSnapDistance,
-              snapEdge: 'start'
+        if (!wouldCauseOverlap(elementStartTime, draggedItemDuration, targetTrack, draggedItemId)) {
+          if (!bestSnapResult || startSnapDistance < bestSnapResult.distance) {
+            bestSnapResult = {
+              elementStartTime: elementStartTime,
+              snapLinePosition: snapPoint.time, // Line appears at snap point
+              distance: startSnapDistance
             };
           }
         }
       }
 
-      // Option 2: Snap dragged item's END to this snap point
+      // Option 2: Connect END of dragged item to this snap point  
+      // Yellow line appears at snapPoint.time, element ends exactly there
       const endSnapDistance = Math.abs(draggedItemEnd - snapPoint.time);
       if (endSnapDistance <= snapThresholdTime) {
-        const potentialStartTime = snapPoint.time - draggedItemDuration;
+        const elementStartTime = snapPoint.time - draggedItemDuration; // Element ends at snap point
         
         // Ensure start time is not negative and check overlap
-        if (potentialStartTime >= 0 && !wouldCauseOverlap(potentialStartTime, draggedItemDuration, targetTrack, draggedItemId)) {
-          if (!bestSnapOption || endSnapDistance < bestSnapOption.distance) {
-            bestSnapOption = {
-              time: potentialStartTime,
-              snapTime: snapPoint.time,
-              distance: endSnapDistance,
-              snapEdge: 'end'
+        if (elementStartTime >= 0 && !wouldCauseOverlap(elementStartTime, draggedItemDuration, targetTrack, draggedItemId)) {
+          if (!bestSnapResult || endSnapDistance < bestSnapResult.distance) {
+            bestSnapResult = {
+              elementStartTime: elementStartTime,
+              snapLinePosition: snapPoint.time, // Line appears at snap point  
+              distance: endSnapDistance
             };
           }
         }
       }
     }
 
-    if (!bestSnapOption) {
+    if (!bestSnapResult) {
       return { time: currentTime, snapped: false, showSnapLine: false };
     }
 
-    // FIXED: If we show the snap line, we always snap immediately
+    // Return the correct element position and snap line position
     return {
-      time: bestSnapOption.time, // Always use snapped position when line is shown
-      snapped: true, // Always snap when we show the line
-      snapLine: bestSnapOption.snapTime,
+      time: bestSnapResult.elementStartTime, // Where element actually goes
+      snapped: true,
+      snapLine: bestSnapResult.snapLinePosition, // Where yellow line appears
       showSnapLine: true
     };
   }, [scale, snapThreshold, wouldCauseOverlap]);
@@ -404,13 +404,31 @@ export const Timeline = ({
         const updatedItems = items.map(i => {
           if (i.id === resizing.itemId) {
             if (resizing.edge === 'left') {
+              // Left edge resize - we want the START of the item to snap to points
               const maxStartTime = i.startTime + i.duration - 0.1;
-              const snapResult = findSnapPoint(newTime, snapPoints, i.duration, i.track, i.id);
-              const newStartTime = Math.max(0, Math.min(snapResult.time, maxStartTime));
+              let newStartTime = newTime;
+              let snapLineTime: number | undefined;
+
+              // Check if we can snap the start to any snap point
+              for (const snapPoint of snapPoints) {
+                const distanceToSnap = Math.abs(newTime - snapPoint.time);
+                const snapThresholdTime = snapThreshold / scale;
+                
+                if (distanceToSnap <= snapThresholdTime) {
+                  const testDuration = (i.startTime + i.duration) - snapPoint.time;
+                  if (testDuration > 0.1 && !wouldCauseOverlap(snapPoint.time, testDuration, i.track, i.id)) {
+                    newStartTime = snapPoint.time;
+                    snapLineTime = snapPoint.time;
+                    break;
+                  }
+                }
+              }
+
+              newStartTime = Math.max(0, Math.min(newStartTime, maxStartTime));
               const durationChange = i.startTime - newStartTime;
 
-              if (snapResult.showSnapLine && snapResult.snapLine !== undefined) {
-                setActiveSnapLines([snapResult.snapLine]);
+              if (snapLineTime !== undefined) {
+                setActiveSnapLines([snapLineTime]);
               } else {
                 setActiveSnapLines([]);
               }
@@ -421,12 +439,34 @@ export const Timeline = ({
                 duration: i.duration + durationChange
               };
             } else {
+              // Right edge resize - we want the END of the item to snap to points
+              const currentEndTime = i.startTime + i.duration;
               const minEndTime = i.startTime + 0.1;
-              const snapResult = findSnapPoint(newTime, snapPoints, i.duration, i.track, i.id);
-              const newEndTime = Math.max(minEndTime, snapResult.time);
+              
+              // For right edge, we're moving the end position
+              let newEndTime = newTime;
+              let snapLineTime: number | undefined;
 
-              if (snapResult.showSnapLine && snapResult.snapLine !== undefined) {
-                setActiveSnapLines([snapResult.snapLine]);
+              // Check if we can snap the end to any snap point
+              for (const snapPoint of snapPoints) {
+                const distanceToSnap = Math.abs(newTime - snapPoint.time);
+                const snapThresholdTime = snapThreshold / scale;
+                
+                if (distanceToSnap <= snapThresholdTime) {
+                  // Check if this end position would cause overlap
+                  const testDuration = snapPoint.time - i.startTime;
+                  if (testDuration > 0.1 && !wouldCauseOverlap(i.startTime, testDuration, i.track, i.id)) {
+                    newEndTime = snapPoint.time;
+                    snapLineTime = snapPoint.time;
+                    break;
+                  }
+                }
+              }
+
+              newEndTime = Math.max(minEndTime, newEndTime);
+
+              if (snapLineTime !== undefined) {
+                setActiveSnapLines([snapLineTime]);
               } else {
                 setActiveSnapLines([]);
               }
