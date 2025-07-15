@@ -182,12 +182,12 @@ export const Timeline = ({
     return snapPoints.sort((a, b) => a.time - b.time); // Sort by time
   }, [items]);
 
-  // Find the closest snap point - FIXED MAGNETIC SNAPPING
+  // Find the closest snap point - FIXED MAGNETIC SNAPPING WITHOUT OVERLAP
   const findSnapPoint = useCallback((currentTime: number, snapPoints: { time: number; type: 'start' | 'end' | 'timeline-start' }[], draggedItemDuration: number): { time: number; snapped: boolean; snapLine?: number; showSnapLine?: boolean } => {
     const snapThresholdTime = snapThreshold / scale; // Convert pixels to time per snapping effettivo
     const visualSnapThresholdTime = visualSnapThreshold / scale; // Convert pixels to time per visualizzazione
 
-    let closestSnapPoint: { time: number; type: 'start' | 'end' | 'timeline-start' } | null = null;
+    let closestSnapPoint: { time: number; type: 'start' | 'end' | 'timeline-start'; snapEdge: 'start' | 'end' } | null = null;
     let minDistance = Infinity;
 
     // Check for both start and end snap points of the dragged item
@@ -196,18 +196,18 @@ export const Timeline = ({
 
     // Find the closest snap point for either start or end of the dragged item
     for (const snapPoint of snapPoints) {
-      // Check distance to start of dragged item
+      // Check distance from dragged item's START to snap point
       const startDistance = Math.abs(draggedItemStart - snapPoint.time);
       if (startDistance < minDistance) {
         minDistance = startDistance;
-        closestSnapPoint = { ...snapPoint, snapTo: 'start' } as any;
+        closestSnapPoint = { ...snapPoint, snapEdge: 'start' };
       }
 
-      // Check distance to end of dragged item
+      // Check distance from dragged item's END to snap point  
       const endDistance = Math.abs(draggedItemEnd - snapPoint.time);
       if (endDistance < minDistance) {
         minDistance = endDistance;
-        closestSnapPoint = { ...snapPoint, snapTo: 'end' } as any;
+        closestSnapPoint = { ...snapPoint, snapEdge: 'end' };
       }
     }
 
@@ -223,16 +223,32 @@ export const Timeline = ({
       if (showSnapLine) {
         let finalTime = currentTime;
 
-        // Se dobbiamo effettivamente snappare, calcola la posizione corretta
+        // Se dobbiamo effettivamente snappare, calcola la posizione corretta per connettere senza overlap
         if (shouldSnap) {
-          const snapTo = (closestSnapPoint as any).snapTo;
-          
-          if (snapTo === 'start') {
-            // Snap start of dragged item to the snap point
-            finalTime = closestSnapPoint.time;
-          } else if (snapTo === 'end') {
-            // Snap end of dragged item to the snap point
-            finalTime = closestSnapPoint.time - draggedItemDuration;
+          if (closestSnapPoint.snapEdge === 'start') {
+            // Snap dragged item's START to the snap point (item starts exactly at snap point)
+            if (closestSnapPoint.type === 'end') {
+              // Connect start of dragged item to end of existing item (no gap, no overlap)
+              finalTime = closestSnapPoint.time;
+            } else if (closestSnapPoint.type === 'start') {
+              // Align starts together
+              finalTime = closestSnapPoint.time;
+            } else {
+              // Timeline start
+              finalTime = 0;
+            }
+          } else {
+            // Snap dragged item's END to the snap point
+            if (closestSnapPoint.type === 'start') {
+              // Connect end of dragged item to start of existing item (no gap, no overlap)
+              finalTime = closestSnapPoint.time - draggedItemDuration;
+            } else if (closestSnapPoint.type === 'end') {
+              // Align ends together
+              finalTime = closestSnapPoint.time - draggedItemDuration;
+            } else {
+              // This case shouldn't happen for end snapping to timeline-start
+              finalTime = closestSnapPoint.time - draggedItemDuration;
+            }
           }
 
           // Ensure finalTime is not negative
@@ -599,7 +615,7 @@ export const Timeline = ({
               className="absolute top-0 bottom-0 w-0.5 bg-playhead z-30 pointer-events-none"
               style={{ left: `${playheadPosition}px` }}
             >
-              <div className="absolute -top-1 -left-2 w-4 h-4 bg-playhead rotate-45 transform"></div>
+              <div className="absolute -top-1 -left-1.5 w-4 h-4 bg-playhead rotate-45 transform"></div>
             </div>
           </div>
         </div>
