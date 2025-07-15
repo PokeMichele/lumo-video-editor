@@ -188,30 +188,30 @@ export const Timeline = ({
   const wouldCauseOverlap = useCallback((startTime: number, duration: number, track: number, excludeId: string) => {
     const itemEnd = startTime + duration;
     const tolerance = 0.001; // Small tolerance for floating point precision
-
+    
     return items.some(item => {
       if (item.id === excludeId || item.track !== track) return false;
-
+      
       const otherStart = item.startTime;
       const otherEnd = item.startTime + item.duration;
-
+      
       // Check for overlap with tolerance: items overlap if one starts before the other ends (with small gap tolerance)
       return (startTime < otherEnd - tolerance && itemEnd > otherStart + tolerance);
     });
   }, [items]);
 
   // FIXED: Find the closest snap point with collision detection
-  const findSnapPoint = useCallback((currentTime: number, snapPoints: { time: number; type: 'start' | 'end' | 'timeline-start' }[], draggedItemDuration: number, targetTrack: number, draggedItemId: string): {
-    time: number;
-    snapped: boolean;
-    snapLine?: number;
-    showSnapLine?: boolean
+  const findSnapPoint = useCallback((currentTime: number, snapPoints: { time: number; type: 'start' | 'end' | 'timeline-start' }[], draggedItemDuration: number, targetTrack: number, draggedItemId: string): { 
+    time: number; 
+    snapped: boolean; 
+    snapLine?: number; 
+    showSnapLine?: boolean 
   } => {
     const snapThresholdTime = snapThreshold / scale;
     const visualSnapThresholdTime = visualSnapThreshold / scale;
 
-    let bestSnapOption: {
-      time: number;
+    let bestSnapOption: { 
+      time: number; 
       snapTime: number;
       distance: number;
       snapEdge: 'start' | 'end';
@@ -226,7 +226,7 @@ export const Timeline = ({
       const startSnapDistance = Math.abs(draggedItemStart - snapPoint.time);
       if (startSnapDistance <= visualSnapThresholdTime) {
         const potentialStartTime = snapPoint.time;
-
+        
         // Check if this would cause overlap
         if (!wouldCauseOverlap(potentialStartTime, draggedItemDuration, targetTrack, draggedItemId)) {
           if (!bestSnapOption || startSnapDistance < bestSnapOption.distance) {
@@ -244,7 +244,7 @@ export const Timeline = ({
       const endSnapDistance = Math.abs(draggedItemEnd - snapPoint.time);
       if (endSnapDistance <= visualSnapThresholdTime) {
         const potentialStartTime = snapPoint.time - draggedItemDuration;
-
+        
         // Ensure start time is not negative and check overlap
         if (potentialStartTime >= 0 && !wouldCauseOverlap(potentialStartTime, draggedItemDuration, targetTrack, draggedItemId)) {
           if (!bestSnapOption || endSnapDistance < bestSnapOption.distance) {
@@ -264,7 +264,7 @@ export const Timeline = ({
     }
 
     const shouldSnap = bestSnapOption.distance <= snapThresholdTime;
-
+    
     return {
       time: shouldSnap ? bestSnapOption.time : currentTime,
       snapped: shouldSnap,
@@ -493,7 +493,7 @@ export const Timeline = ({
               ? { ...item, startTime: finalTime, track: newTrack }
               : item
           );
-
+          
           // Use throttled update but pass the preview for synchronization
           throttledUpdateItems(updatedItems, newDragPreview);
         } else {
@@ -544,11 +544,11 @@ export const Timeline = ({
   // FIXED: Render timeline item with improved drag preview handling
   const renderTimelineItem = (item: TimelineItem, track: number) => {
     const isDraggedItem = draggedItem === item.id;
-
+    
     // FIXED: Use drag preview data if available, otherwise use item data
     let displayStartTime = item.startTime;
     let displayTrack = track;
-
+    
     if (isDraggedItem && dragPreview) {
       displayStartTime = dragPreview.startTime;
       displayTrack = dragPreview.track;
