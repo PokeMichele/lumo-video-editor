@@ -11,6 +11,7 @@ interface CompositeVideoPlayerProps {
   isPlaying: boolean;
   onTimeUpdate: (time: number) => void;
   onPlayStateChange: (playing: boolean) => void;
+  aspectRatio: '16:9' | '4:3' | '9:16';
 }
 
 export const CompositeVideoPlayer = ({
@@ -18,7 +19,8 @@ export const CompositeVideoPlayer = ({
   currentTime,
   isPlaying,
   onTimeUpdate,
-  onPlayStateChange
+  onPlayStateChange,
+  aspectRatio
 }: CompositeVideoPlayerProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hiddenVideoContainerRef = useRef<HTMLDivElement>(null);
@@ -30,6 +32,23 @@ export const CompositeVideoPlayer = ({
   const [userInteracted, setUserInteracted] = useState(false);
   const lastTimeRef = useRef(currentTime);
   const previousCurrentTimeRef = useRef(currentTime);
+
+  // Calculate canvas dimensions based on aspect ratio
+  const getCanvasDimensions = () => {
+    const baseWidth = 1280;
+    switch (aspectRatio) {
+      case '16:9':
+        return { width: baseWidth, height: Math.round(baseWidth / (16/9)) };
+      case '4:3':
+        return { width: baseWidth, height: Math.round(baseWidth / (4/3)) };
+      case '9:16':
+        return { width: Math.round(baseWidth * (9/16)), height: baseWidth };
+      default:
+        return { width: baseWidth, height: Math.round(baseWidth / (16/9)) };
+    }
+  };
+
+  const canvasDimensions = getCanvasDimensions();
 
   // FIXED: Sincronizza lastTimeRef quando currentTime cambia dall'esterno (manual seek)
   useEffect(() => {
@@ -497,11 +516,11 @@ return (
       <div className="flex-1 flex items-center justify-center bg-black relative p-2 min-h-0">
         <canvas
           ref={canvasRef}
-          width={1280}
-          height={720}
+          width={canvasDimensions.width}
+          height={canvasDimensions.height}
           className="w-full h-full object-contain border border-muted-foreground/20 bg-black"
           style={{ 
-            aspectRatio: '16/9',
+            aspectRatio: aspectRatio.replace(':', '/'),
             maxHeight: 'calc(100% - 20px)', // Lascia spazio per il padding
             maxWidth: 'calc(100% - 20px)'
           }}

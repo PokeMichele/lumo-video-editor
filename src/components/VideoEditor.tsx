@@ -36,6 +36,7 @@ export const VideoEditor = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [history, setHistory] = useState<HistoryState[]>([{ timelineItems: [], currentTime: 0 }]);
   const [historyIndex, setHistoryIndex] = useState(0);
+  const [aspectRatio, setAspectRatio] = useState<'16:9' | '4:3' | '9:16'>('16:9');
   
   // Gestione tracce dinamiche
   const [tracks, setTracks] = useState<Track[]>([
@@ -187,7 +188,22 @@ export const VideoEditor = () => {
         <div className="flex-1 flex flex-col">
           {/* Video Player - AREA PRINCIPALE CON DIMENSIONI FISSE */}
           <div className="relative bg-card border-b border-border" style={{ height: 'calc(100vh - 400px)' }}>
-            <div className="absolute top-4 right-4 z-10">
+            <div className="absolute top-4 right-4 z-10 flex items-center gap-3">
+              {/* Aspect Ratio Buttons */}
+              <div className="flex items-center gap-1 bg-background/80 backdrop-blur-sm border border-border rounded-lg p-1">
+                {(['16:9', '4:3', '9:16'] as const).map((ratio) => (
+                  <Button
+                    key={ratio}
+                    onClick={() => setAspectRatio(ratio)}
+                    variant={aspectRatio === ratio ? "default" : "ghost"}
+                    size="sm"
+                    className="h-8 px-2 text-xs font-medium"
+                  >
+                    {ratio}
+                  </Button>
+                ))}
+              </div>
+              
               <Button
                 onClick={handleExport}
                 className="bg-gradient-primary hover:opacity-90 shadow-elegant"
@@ -205,6 +221,7 @@ export const VideoEditor = () => {
                 isPlaying={isPlaying}
                 onTimeUpdate={setCurrentTime}
                 onPlayStateChange={setIsPlaying}
+                aspectRatio={aspectRatio}
               />
             </div>
           </div>
