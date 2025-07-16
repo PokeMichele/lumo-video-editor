@@ -29,7 +29,6 @@ export const CompositeVideoPlayer = ({
   const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
   const imageElementsRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const [volume, setVolume] = useState(100);
-  const [userInteracted, setUserInteracted] = useState(false);
   const lastTimeRef = useRef(currentTime);
   const previousCurrentTimeRef = useRef(currentTime);
 
@@ -56,7 +55,7 @@ export const CompositeVideoPlayer = ({
       // Se il currentTime è cambiato significativamente dall'esterno (non dall'animation loop)
       lastTimeRef.current = currentTime;
       previousCurrentTimeRef.current = currentTime;
-      
+
       // Forza la sincronizzazione di tutti i media elements
       forceSyncAllMedia();
     } else {
@@ -83,7 +82,7 @@ export const CompositeVideoPlayer = ({
         const relativeTime = currentTime - item.startTime;
         const mediaOffset = item.mediaStartOffset || 0;
         const actualVideoTime = relativeTime + mediaOffset;
-        
+
         if (actualVideoTime >= 0 && actualVideoTime <= video.duration) {
           video.currentTime = actualVideoTime;
         }
@@ -97,7 +96,7 @@ export const CompositeVideoPlayer = ({
         const relativeTime = currentTime - item.startTime;
         const mediaOffset = item.mediaStartOffset || 0;
         const actualAudioTime = relativeTime + mediaOffset;
-        
+
         if (actualAudioTime >= 0 && actualAudioTime <= audio.duration) {
           audio.currentTime = actualAudioTime;
         }
@@ -116,7 +115,7 @@ export const CompositeVideoPlayer = ({
           const video = document.createElement('video');
           video.src = item.mediaFile.url;
           video.crossOrigin = 'anonymous';
-          video.muted = !userInteracted; // Inizia muted per permettere autoplay
+          video.muted = false; // Audio abilitato di default
           video.volume = volume / 100;
           video.style.display = 'none';
           video.preload = 'metadata';
@@ -139,7 +138,7 @@ export const CompositeVideoPlayer = ({
           const audio = document.createElement('audio');
           audio.src = item.mediaFile.url;
           audio.crossOrigin = 'anonymous';
-          audio.muted = !userInteracted;
+          audio.muted = false; // Audio abilitato di default
           audio.volume = volume / 100;
           audio.preload = 'metadata';
 
@@ -165,7 +164,7 @@ export const CompositeVideoPlayer = ({
         }
       }
     });
-  }, [timelineItems, volume, userInteracted]);
+  }, [timelineItems, volume]);
 
   // Gestisci il play/pause e la sincronizzazione dei media
   useEffect(() => {
@@ -184,7 +183,7 @@ export const CompositeVideoPlayer = ({
           video.currentTime = actualVideoTime;
         }
 
-        if (isPlaying && userInteracted && actualVideoTime >= 0 && actualVideoTime <= video.duration) {
+        if (isPlaying && actualVideoTime >= 0 && actualVideoTime <= video.duration) {
           video.muted = false;
           video.volume = volume / 100;
           video.play().catch(e => {
@@ -214,7 +213,7 @@ export const CompositeVideoPlayer = ({
           audio.currentTime = actualAudioTime;
         }
 
-        if (isPlaying && userInteracted && actualAudioTime >= 0 && actualAudioTime <= audio.duration) {
+        if (isPlaying && actualAudioTime >= 0 && actualAudioTime <= audio.duration) {
           audio.muted = false;
           audio.volume = volume / 100;
           audio.play().catch(e => {
@@ -227,7 +226,7 @@ export const CompositeVideoPlayer = ({
         audio.pause();
       }
     });
-  }, [isPlaying, getActiveItems, currentTime, volume, userInteracted]);
+  }, [isPlaying, getActiveItems, currentTime, volume]);
 
   // Rendering composito su canvas
   const renderComposite = useCallback(() => {
@@ -418,17 +417,7 @@ export const CompositeVideoPlayer = ({
         console.warn(`Error rendering item ${item.id}:`, error);
       }
     });
-
-// HUD minimale: solo messaggio audio
-if (!userInteracted) {
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-  ctx.fillRect(10, 10, 250, 30);
-  ctx.fillStyle = '#ffaa00';
-  ctx.font = '12px Arial';
-  ctx.fillText(`⚠️ Click to enable audio`, 20, 30);
-}
-
-  }, [currentTime, timelineItems, getActiveItems, userInteracted]);
+  }, [currentTime, timelineItems, getActiveItems]);
 
   // FIXED: Animation loop migliorato per il playback - usa sempre lastTimeRef come riferimento
   useEffect(() => {
@@ -440,7 +429,7 @@ if (!userInteracted) {
         onTimeUpdate(newTime);
         animationFrameRef.current = requestAnimationFrame(animate);
       };
-      
+
       // FIXED: Assicurati che lastTimeRef sia sincronizzato prima di iniziare l'animazione
       lastTimeRef.current = currentTime;
       animationFrameRef.current = requestAnimationFrame(animate);
@@ -464,16 +453,11 @@ if (!userInteracted) {
   }, [renderComposite]);
 
   const handlePlayPause = () => {
-    // Abilita l'interazione utente per sbloccare l'audio
-    if (!userInteracted) {
-      setUserInteracted(true);
-    }
-    
     // FIXED: Quando si preme play, assicurati che lastTimeRef sia sincronizzato con currentTime
     if (!isPlaying) {
       lastTimeRef.current = currentTime;
     }
-    
+
     onPlayStateChange(!isPlaying);
   };
 
@@ -507,7 +491,7 @@ if (!userInteracted) {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-return (
+  return (
     <div className="h-full flex flex-col">
       {/* Hidden container per video/audio elements */}
       <div ref={hiddenVideoContainerRef} style={{ display: 'none' }} />
@@ -519,24 +503,12 @@ return (
           width={canvasDimensions.width}
           height={canvasDimensions.height}
           className="w-full h-full object-contain border border-muted-foreground/20 bg-black"
-          style={{ 
+          style={{
             aspectRatio: aspectRatio.replace(':', '/'),
             maxHeight: 'calc(100% - 20px)', // Lascia spazio per il padding
             maxWidth: 'calc(100% - 20px)'
           }}
-          onClick={() => {
-            if (!userInteracted) {
-              setUserInteracted(true);
-            }
-          }}
         />
-
-        {/* Audio Warning */}
-        {!userInteracted && (
-          <div className="absolute bottom-2 left-2 bg-yellow-600/90 text-white px-2 py-1 rounded-md text-xs backdrop-blur-sm">
-            ⚠️ Click to enable audio
-          </div>
-        )}
       </div>
 
       {/* Controls - Always visible */}
