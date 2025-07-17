@@ -170,6 +170,7 @@ export const VideoEditor = () => {
     setIsEffectsDialogOpen(true);
   };
 
+  // AGGIORNATO: Funzione per applicare effetti con durate dinamiche
   const handleApplyEffect = (effectId: string, itemId?: string) => {
     // Trova la prima track video disponibile
     const firstVideoTrack = tracks.find(track => track.type === 'video');
@@ -182,17 +183,27 @@ export const VideoEditor = () => {
       return;
     }
 
+    // NUOVO: Definisci le durate predefinite per ogni effetto
+    const effectDurations: { [key: string]: number } = {
+      'fade-in': 2,
+      'fade-out': 2,
+      'black-white': 3
+    };
+
     // Crea un nuovo MediaFile per l'effetto
     const effectName = effectId.split('-').map(word => 
       word.charAt(0).toUpperCase() + word.slice(1)
     ).join(' ');
+
+    // AGGIORNATO: Usa la durata specifica dell'effetto
+    const effectDuration = effectDurations[effectId] || 2; // Default 2 secondi se non specificato
 
     const effectMediaFile: MediaFile = {
       id: `effect-${effectId}-${Date.now()}`,
       name: effectName,
       type: 'effect',
       url: '', // Gli effetti non hanno URL
-      duration: 2, // Durata predefinita di 2 secondi
+      duration: effectDuration, // AGGIORNATO: Usa durata dinamica
       effectType: effectId
     };
 
@@ -215,7 +226,7 @@ export const VideoEditor = () => {
       id: `timeline-effect-${Date.now()}-${Math.random()}`,
       mediaFile: effectMediaFile,
       startTime: targetStartTime,
-      duration: 2, // Durata predefinita di 2 secondi
+      duration: effectDuration, // AGGIORNATO: Usa la durata specifica dell'effetto
       track: firstVideoTrack.index,
       mediaStartOffset: 0
     };

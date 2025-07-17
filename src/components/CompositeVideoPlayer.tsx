@@ -14,6 +14,15 @@ interface CompositeVideoPlayerProps {
   aspectRatio: '16:9' | '4:3' | '9:16';
 }
 
+// AGGIORNATO: Interfaccia per gestire tutti gli effetti attivi
+interface ActiveEffect {
+  id: string;
+  name: string;
+  type: string;
+  progress: number; // 0 a 1
+  intensity: number; // Intensità dell'effetto (0 a 1)
+}
+
 export const CompositeVideoPlayer = ({
   timelineItems,
   currentTime,
@@ -58,48 +67,65 @@ export const CompositeVideoPlayer = ({
     ).sort((a, b) => a.track - b.track);
   }, [timelineItems, currentTime]);
 
-  // AGGIORNATO: Funzione per calcolare l'alfa globale basato sugli effetti attivi
-  const calculateGlobalAlpha = useCallback((time: number) => {
+  // AGGIORNATO: Funzione per calcolare tutti gli effetti attivi
+  const calculateActiveEffects = useCallback((time: number): ActiveEffect[] => {
     const activeEffects = timelineItems.filter(item =>
       item.mediaFile.type === 'effect' &&
       time >= item.startTime &&
       time < item.startTime + item.duration
     );
 
-    let globalAlpha = 1.0;
-
-    activeEffects.forEach(effect => {
-      if (!effect.mediaFile.effectType) return;
-
+    return activeEffects.map(effect => {
       const relativeTime = time - effect.startTime;
       const progress = relativeTime / effect.duration; // 0 a 1
+      
+      let intensity = 1; // Intensità di default
 
       switch (effect.mediaFile.effectType) {
         case 'fade-in':
-          // Fade in: alpha va da 0 a 1 durante la durata dell'effetto
-          const fadeInAlpha = Math.min(progress, 1);
-          globalAlpha *= fadeInAlpha;
+          intensity = Math.min(progress, 1);
           break;
-          
         case 'fade-out':
-          // Fade out: alpha va da 1 a 0 durante la durata dell'effetto
-          const fadeOutAlpha = Math.max(1 - progress, 0);
-          globalAlpha *= fadeOutAlpha;
+          intensity = Math.max(1 - progress, 0);
           break;
+        case 'black-white':
+          // Per il black & white, l'intensità è sempre 1 (completamente attivo)
+          intensity = 1;
+          break;
+        default:
+          intensity = 1;
+      }
+
+      return {
+        id: effect.id,
+        name: effect.mediaFile.name,
+        type: effect.mediaFile.effectType || 'unknown',
+        progress: Math.min(Math.max(progress, 0), 1),
+        intensity: Math.min(Math.max(intensity, 0), 1)
+      };
+    });
+  }, [timelineItems]);
+
+  // AGGIORNATO: Funzione per calcolare l'alfa globale (solo per effetti di fade)
+  const calculateGlobalAlpha = useCallback((activeEffects: ActiveEffect[]) => {
+    let globalAlpha = 1.0;
+
+    activeEffects.forEach(effect => {
+      if (effect.type === 'fade-in' || effect.type === 'fade-out') {
+        globalAlpha *= effect.intensity;
       }
     });
 
     return Math.max(0, Math.min(1, globalAlpha));
-  }, [timelineItems]);
+  }, []);
 
-  // AGGIORNATO: Funzione per renderizzare indicatori degli effetti (solo per preview)
-  const renderEffectIndicators = useCallback((ctx: CanvasRenderingContext2D, canvasWidth: number, canvasHeight: number) => {
-    const activeEffects = timelineItems.filter(item =>
-      item.mediaFile.type === 'effect' &&
-      currentTime >= item.startTime &&
-      currentTime < item.startTime + item.duration
-    );
+  // NUOVO: Funzione per verificare se è attivo l'effetto black & white
+  const isBlackWhiteActive = useCallback((activeEffects: ActiveEffect[]) => {
+    return activeEffects.some(effect => effect.type === 'black-white');
+  }, []);
 
+  // AGGIORNATO: Funzione per renderizzare indicatori degli effetti
+  const renderEffectIndicators = useCallback((ctx: CanvasRenderingContext2D, canvasWidth: number, canvasHeight: number, activeEffects: ActiveEffect[]) => {
     if (activeEffects.length === 0) return;
 
     // Salva il contesto per gli indicatori
@@ -107,9 +133,6 @@ export const CompositeVideoPlayer = ({
     ctx.globalAlpha = 0.8;
 
     activeEffects.forEach((effect, index) => {
-      const relativeTime = currentTime - effect.startTime;
-      const progress = relativeTime / effect.duration;
-
       // Disegna un sottile bordo rosso per indicare l'effetto attivo
       ctx.strokeStyle = '#ff0000';
       ctx.lineWidth = 3;
@@ -118,16 +141,23 @@ export const CompositeVideoPlayer = ({
       
       // Testo dell'effetto nell'angolo
       const textY = 25 + index * 25;
-      ctx.fillStyle = 'rgba(255, 0, 0, 0.9)';
+      
+      // Colore di sfondo specifico per tipo di effetto
+      let bgColor = 'rgba(255, 0, 0, 0.9)'; // Default rosso
+      if (effect.type === 'black-white') {
+        bgColor = 'rgba(128, 128, 128, 0.9)'; // Grigio per black & white
+      }
+      
+      ctx.fillStyle = bgColor;
       ctx.fillRect(10, textY - 15, 150, 20);
       ctx.fillStyle = '#ffffff';
       ctx.font = '12px Arial';
       ctx.textAlign = 'left';
-      ctx.fillText(`${effect.mediaFile.name} (${(progress * 100).toFixed(0)}%)`, 15, textY);
+      ctx.fillText(`${effect.name} (${(effect.progress * 100).toFixed(0)}%)`, 15, textY);
     });
 
     ctx.restore();
-  }, [timelineItems, currentTime]);
+  }, []);
 
   // OTTIMIZZAZIONE: Throttled render function
   const renderComposite = useCallback(() => {
@@ -163,17 +193,28 @@ export const CompositeVideoPlayer = ({
       return;
     }
 
-    // AGGIORNATO: Calcola l'alfa globale basato sugli effetti attivi
-    const globalAlpha = calculateGlobalAlpha(currentTime);
+    // AGGIORNATO: Calcola gli effetti attivi
+    const activeEffects = calculateActiveEffects(currentTime);
+    const globalAlpha = calculateGlobalAlpha(activeEffects);
+    const blackWhiteActive = isBlackWhiteActive(activeEffects);
     
     // Separa gli elementi media dagli effetti
     const mediaItems = activeItems.filter(item => item.mediaFile.type !== 'effect');
 
-    // Applica l'alfa globale prima di renderizzare i media
+    // AGGIORNATO: Applica gli effetti prima di renderizzare i media
     ctx.save();
+    
+    // Applica l'alfa globale per gli effetti di fade
     ctx.globalAlpha = globalAlpha;
+    
+    // NUOVO: Applica il filtro black & white se attivo
+    if (blackWhiteActive) {
+      ctx.filter = 'grayscale(1)';
+    } else {
+      ctx.filter = 'none';
+    }
 
-    // Renderizza tutti gli elementi media con l'alfa applicato
+    // Renderizza tutti gli elementi media con gli effetti applicati
     mediaItems.forEach(item => {
       const relativeTime = currentTime - item.startTime;
       
@@ -213,6 +254,7 @@ export const CompositeVideoPlayer = ({
             if (globalAlpha > 0.8) {
               ctx.save();
               ctx.globalAlpha = globalAlpha * 0.7;
+              ctx.filter = 'none'; // Rimuovi filtri per l'overlay
               ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
               ctx.fillRect(offsetX + trackOffsetX, offsetY + trackOffsetY, 250, 30);
               ctx.globalAlpha = globalAlpha;
@@ -271,8 +313,8 @@ export const CompositeVideoPlayer = ({
     ctx.restore();
 
     // Renderizza gli indicatori degli effetti sopra tutto (solo per preview)
-    renderEffectIndicators(ctx, canvas.width, canvas.height);
-  }, [activeItems, currentTime, canvasDimensions, calculateGlobalAlpha, renderEffectIndicators]);
+    renderEffectIndicators(ctx, canvas.width, canvas.height, activeEffects);
+  }, [activeItems, currentTime, canvasDimensions, calculateActiveEffects, calculateGlobalAlpha, isBlackWhiteActive, renderEffectIndicators]);
 
   // AGGIORNATO: Gestione elementi media migliorata - ora gestisce anche gli effetti
   useEffect(() => {

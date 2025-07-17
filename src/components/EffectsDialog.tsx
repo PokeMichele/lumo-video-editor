@@ -2,7 +2,7 @@ import { useState, useCallback } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { TrendingUp, TrendingDown, Sparkles, X, Info } from "lucide-react";
+import { TrendingUp, TrendingDown, Sparkles, X, Info, Filter } from "lucide-react";
 import { TimelineItem } from "./VideoEditor";
 
 interface Effect {
@@ -41,6 +41,15 @@ const AVAILABLE_EFFECTS: Effect[] = [
     category: 'transition',
     duration: 2,
     previewHint: 'Creates a smooth transition from opaque to transparent'
+  },
+  {
+    id: 'black-white',
+    name: 'Black & White',
+    description: 'Convert colors to grayscale for artistic effect',
+    icon: Filter,
+    category: 'visual',
+    duration: 3,
+    previewHint: 'Removes all color information, creating a classic black and white look'
   }
 ];
 
@@ -61,7 +70,7 @@ export const EffectsDialog = ({
   const categories = [
     { id: 'all', name: 'All Effects', icon: Sparkles },
     { id: 'transition', name: 'Transitions', icon: TrendingUp },
-    { id: 'visual', name: 'Visual', icon: Sparkles },
+    { id: 'visual', name: 'Visual', icon: Filter }, // Cambiato icona per categoria visual
     { id: 'audio', name: 'Audio', icon: TrendingDown }
   ];
 
@@ -88,6 +97,8 @@ export const EffectsDialog = ({
         return `opacity: 0 → 100% (${effect.duration}s)`;
       case 'fade-out':
         return `opacity: 100% → 0 (${effect.duration}s)`;
+      case 'black-white':
+        return `color → grayscale (${effect.duration}s)`;
       default:
         return `${effect.description} (${effect.duration}s)`;
     }
