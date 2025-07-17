@@ -58,60 +58,76 @@ export const CompositeVideoPlayer = ({
     ).sort((a, b) => a.track - b.track);
   }, [timelineItems, currentTime]);
 
-  // AGGIORNATO: Funzione per applicare effetti al canvas
-  const applyEffect = useCallback((ctx: CanvasRenderingContext2D, effectType: string, progress: number, canvasWidth: number, canvasHeight: number) => {
-    switch (effectType) {
-      case 'fade-in':
-        // Fade in: alpha va da 0 a 1 durante la durata dell'effetto
-        const fadeInAlpha = Math.min(progress, 1);
-        ctx.globalAlpha = fadeInAlpha;
-        break;
-        
-      case 'fade-out':
-        // Fade out: alpha va da 1 a 0 durante la durata dell'effetto
-        const fadeOutAlpha = Math.max(1 - progress, 0);
-        ctx.globalAlpha = fadeOutAlpha;
-        break;
-        
-      default:
-        // Effetto non riconosciuto, non fare nulla
-        break;
-    }
-  }, []);
+  // AGGIORNATO: Funzione per calcolare l'alfa globale basato sugli effetti attivi
+  const calculateGlobalAlpha = useCallback((time: number) => {
+    const activeEffects = timelineItems.filter(item =>
+      item.mediaFile.type === 'effect' &&
+      time >= item.startTime &&
+      time < item.startTime + item.duration
+    );
 
-  // AGGIORNATO: Funzione per renderizzare gli effetti
-  const renderEffect = useCallback((ctx: CanvasRenderingContext2D, effect: TimelineItem, canvasWidth: number, canvasHeight: number) => {
-    if (!effect.mediaFile.effectType) return;
+    let globalAlpha = 1.0;
 
-    const relativeTime = currentTime - effect.startTime;
-    const progress = relativeTime / effect.duration; // 0 a 1
+    activeEffects.forEach(effect => {
+      if (!effect.mediaFile.effectType) return;
 
-    // Salva il contesto corrente
+      const relativeTime = time - effect.startTime;
+      const progress = relativeTime / effect.duration; // 0 a 1
+
+      switch (effect.mediaFile.effectType) {
+        case 'fade-in':
+          // Fade in: alpha va da 0 a 1 durante la durata dell'effetto
+          const fadeInAlpha = Math.min(progress, 1);
+          globalAlpha *= fadeInAlpha;
+          break;
+          
+        case 'fade-out':
+          // Fade out: alpha va da 1 a 0 durante la durata dell'effetto
+          const fadeOutAlpha = Math.max(1 - progress, 0);
+          globalAlpha *= fadeOutAlpha;
+          break;
+      }
+    });
+
+    return Math.max(0, Math.min(1, globalAlpha));
+  }, [timelineItems]);
+
+  // AGGIORNATO: Funzione per renderizzare indicatori degli effetti (solo per preview)
+  const renderEffectIndicators = useCallback((ctx: CanvasRenderingContext2D, canvasWidth: number, canvasHeight: number) => {
+    const activeEffects = timelineItems.filter(item =>
+      item.mediaFile.type === 'effect' &&
+      currentTime >= item.startTime &&
+      currentTime < item.startTime + item.duration
+    );
+
+    if (activeEffects.length === 0) return;
+
+    // Salva il contesto per gli indicatori
     ctx.save();
+    ctx.globalAlpha = 0.8;
 
-    // Applica l'effetto
-    applyEffect(ctx, effect.mediaFile.effectType, progress, canvasWidth, canvasHeight);
+    activeEffects.forEach((effect, index) => {
+      const relativeTime = currentTime - effect.startTime;
+      const progress = relativeTime / effect.duration;
 
-    // Disegna un overlay semitrasparente per visualizzare l'effetto in preview
-    if (effect.mediaFile.effectType === 'fade-in' || effect.mediaFile.effectType === 'fade-out') {
-      // Per i fade, mostriamo un sottile overlay colorato ai bordi
+      // Disegna un sottile bordo rosso per indicare l'effetto attivo
       ctx.strokeStyle = '#ff0000';
-      ctx.lineWidth = 4;
-      ctx.setLineDash([10, 5]);
-      ctx.strokeRect(2, 2, canvasWidth - 4, canvasHeight - 4);
+      ctx.lineWidth = 3;
+      ctx.setLineDash([8, 4]);
+      ctx.strokeRect(5 + index * 3, 5 + index * 3, canvasWidth - 10 - index * 6, canvasHeight - 10 - index * 6);
       
       // Testo dell'effetto nell'angolo
-      ctx.fillStyle = 'rgba(255, 0, 0, 0.8)';
-      ctx.fillRect(10, 10, 120, 30);
+      const textY = 25 + index * 25;
+      ctx.fillStyle = 'rgba(255, 0, 0, 0.9)';
+      ctx.fillRect(10, textY - 15, 150, 20);
       ctx.fillStyle = '#ffffff';
-      ctx.font = '14px Arial';
+      ctx.font = '12px Arial';
       ctx.textAlign = 'left';
-      ctx.fillText(`${effect.mediaFile.name}`, 15, 30);
-    }
+      ctx.fillText(`${effect.mediaFile.name} (${(progress * 100).toFixed(0)}%)`, 15, textY);
+    });
 
-    // Ripristina il contesto
     ctx.restore();
-  }, [currentTime, applyEffect]);
+  }, [timelineItems, currentTime]);
 
   // OTTIMIZZAZIONE: Throttled render function
   const renderComposite = useCallback(() => {
@@ -147,11 +163,17 @@ export const CompositeVideoPlayer = ({
       return;
     }
 
-    // AGGIORNATO: Separa gli elementi media dagli effetti
+    // AGGIORNATO: Calcola l'alfa globale basato sugli effetti attivi
+    const globalAlpha = calculateGlobalAlpha(currentTime);
+    
+    // Separa gli elementi media dagli effetti
     const mediaItems = activeItems.filter(item => item.mediaFile.type !== 'effect');
-    const effectItems = activeItems.filter(item => item.mediaFile.type === 'effect');
 
-    // Prima renderizza tutti gli elementi media
+    // Applica l'alfa globale prima di renderizzare i media
+    ctx.save();
+    ctx.globalAlpha = globalAlpha;
+
+    // Renderizza tutti gli elementi media con l'alfa applicato
     mediaItems.forEach(item => {
       const relativeTime = currentTime - item.startTime;
       
@@ -187,20 +209,26 @@ export const CompositeVideoPlayer = ({
               renderHeight - trackOffsetY * 2
             );
 
-            // Overlay ottimizzato
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-            ctx.fillRect(offsetX + trackOffsetX, offsetY + trackOffsetY, 250, 30);
-            ctx.fillStyle = '#ffffff';
-            ctx.font = '14px Arial';
-            ctx.textAlign = 'left';
-            const audioIcon = video.muted ? '🔇' : '🔊';
-            const mediaOffset = item.mediaStartOffset || 0;
-            const displayTime = relativeTime + mediaOffset;
-            ctx.fillText(
-              `${audioIcon} ${item.mediaFile.name} (${displayTime.toFixed(1)}s)`,
-              offsetX + trackOffsetX + 10,
-              offsetY + trackOffsetY + 20
-            );
+            // Overlay ottimizzato (solo se globalAlpha è vicino a 1)
+            if (globalAlpha > 0.8) {
+              ctx.save();
+              ctx.globalAlpha = globalAlpha * 0.7;
+              ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+              ctx.fillRect(offsetX + trackOffsetX, offsetY + trackOffsetY, 250, 30);
+              ctx.globalAlpha = globalAlpha;
+              ctx.fillStyle = '#ffffff';
+              ctx.font = '14px Arial';
+              ctx.textAlign = 'left';
+              const audioIcon = video.muted ? '🔇' : '🔊';
+              const mediaOffset = item.mediaStartOffset || 0;
+              const displayTime = relativeTime + mediaOffset;
+              ctx.fillText(
+                `${audioIcon} ${item.mediaFile.name} (${displayTime.toFixed(1)}s)`,
+                offsetX + trackOffsetX + 10,
+                offsetY + trackOffsetY + 20
+              );
+              ctx.restore();
+            }
           }
         } else if (item.mediaFile.type === 'image') {
           const img = imageElementsRef.current.get(item.id);
@@ -239,15 +267,12 @@ export const CompositeVideoPlayer = ({
       }
     });
 
-    // NUOVO: Poi applica tutti gli effetti sopra il contenuto media
-    effectItems.forEach(effect => {
-      try {
-        renderEffect(ctx, effect, canvas.width, canvas.height);
-      } catch (error) {
-        console.warn(`Error rendering effect ${effect.id}:`, error);
-      }
-    });
-  }, [activeItems, currentTime, canvasDimensions, renderEffect]);
+    // Ripristina il contesto dopo aver applicato gli effetti
+    ctx.restore();
+
+    // Renderizza gli indicatori degli effetti sopra tutto (solo per preview)
+    renderEffectIndicators(ctx, canvas.width, canvas.height);
+  }, [activeItems, currentTime, canvasDimensions, calculateGlobalAlpha, renderEffectIndicators]);
 
   // AGGIORNATO: Gestione elementi media migliorata - ora gestisce anche gli effetti
   useEffect(() => {

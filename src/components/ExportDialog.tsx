@@ -39,6 +39,8 @@ export const ExportDialog = ({
   const recordedChunksRef = useRef<Blob[]>([]);
   const cancelledRef = useRef<boolean>(false);
   const timeoutRef = useRef<number | null>(null);
+  const renderingRef = useRef<boolean>(false); // NUOVO: Flag per evitare rendering multipli
+  const completedRef = useRef<boolean>(false); // NUOVO: Flag per indicare completamento
   
   // OTTIMIZZAZIONE: Cache unificata per tutti i media elements
   const mediaCache = useRef<MediaElementCache>({
@@ -69,6 +71,38 @@ export const ExportDialog = ({
         return { width: baseWidth, height: Math.round(baseWidth / (16/9)) };
     }
   }, [aspectRatio]);
+
+  // AGGIORNATO: Funzione per calcolare l'alfa globale basato sugli effetti (per export)
+  const calculateGlobalAlpha = useCallback((time: number) => {
+    const activeEffects = timelineItems.filter(item =>
+      item.mediaFile.type === 'effect' &&
+      time >= item.startTime &&
+      time < item.startTime + item.duration
+    );
+
+    let globalAlpha = 1.0;
+
+    activeEffects.forEach(effect => {
+      if (!effect.mediaFile.effectType) return;
+
+      const relativeTime = time - effect.startTime;
+      const progress = relativeTime / effect.duration; // 0 a 1
+
+      switch (effect.mediaFile.effectType) {
+        case 'fade-in':
+          const fadeInAlpha = Math.min(progress, 1);
+          globalAlpha *= fadeInAlpha;
+          break;
+          
+        case 'fade-out':
+          const fadeOutAlpha = Math.max(1 - progress, 0);
+          globalAlpha *= fadeOutAlpha;
+          break;
+      }
+    });
+
+    return Math.max(0, Math.min(1, globalAlpha));
+  }, [timelineItems]);
 
   // OTTIMIZZAZIONE: Preload intelligente dei media
   const preloadMedia = useCallback(async () => {
@@ -107,8 +141,8 @@ export const ExportDialog = ({
       }
     });
 
-    // Carica nuovi elementi in parallelo
-    for (const item of timelineItems) {
+    // Carica nuovi elementi in parallelo (solo media, esclusi effetti)
+    for (const item of timelineItems.filter(item => item.mediaFile.type !== 'effect')) {
       if (cancelledRef.current) break;
 
       if (item.mediaFile.type === 'video' && !cache.videos.has(item.id)) {
@@ -233,7 +267,7 @@ export const ExportDialog = ({
       masterGain.gain.value = 1.0;
       masterGain.connect(destination);
       
-      // Connetti tutti gli elementi audio
+      // Connetti tutti gli elementi audio (solo audio e video)
       const audioPromises = timelineItems
         .filter(item => item.mediaFile.type === 'audio' || item.mediaFile.type === 'video')
         .map(async (item) => {
@@ -268,9 +302,9 @@ export const ExportDialog = ({
     }
   }, [timelineItems]);
 
-  // OTTIMIZZAZIONE: Render frame migliorato con caching
+  // AGGIORNATO: Render frame migliorato con supporto effetti
   const renderFrame = useCallback(async (time: number, ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement) => {
-    if (cancelledRef.current) return;
+    if (cancelledRef.current || completedRef.current) return;
 
     const perf = performanceRef.current;
     perf.frameStartTime = performance.now();
@@ -279,12 +313,21 @@ export const ExportDialog = ({
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Get active items at this time
+    // Get active items at this time (esclusi effetti per il rendering)
     const activeItems = timelineItems.filter(item =>
-      time >= item.startTime && time < item.startTime + item.duration
+      item.mediaFile.type !== 'effect' &&
+      time >= item.startTime && 
+      time < item.startTime + item.duration
     ).sort((a, b) => a.track - b.track);
 
     if (activeItems.length === 0) return;
+
+    // NUOVO: Calcola l'alfa globale basato sugli effetti attivi
+    const globalAlpha = calculateGlobalAlpha(time);
+    
+    // Applica l'alfa globale prima di renderizzare i media
+    ctx.save();
+    ctx.globalAlpha = globalAlpha;
 
     // OTTIMIZZAZIONE: Batch rendering per tipo di media
     const videoItems = activeItems.filter(item => item.mediaFile.type === 'video');
@@ -292,7 +335,7 @@ export const ExportDialog = ({
 
     // Render videos
     for (const item of videoItems) {
-      if (cancelledRef.current) break;
+      if (cancelledRef.current || completedRef.current) break;
 
       const video = mediaCache.current.videos.get(item.id);
       if (!video) continue;
@@ -345,7 +388,7 @@ export const ExportDialog = ({
 
     // Render images
     for (const item of imageItems) {
-      if (cancelledRef.current) break;
+      if (cancelledRef.current || completedRef.current) break;
 
       const img = mediaCache.current.images.get(item.id);
       if (!img || !img.complete) continue;
@@ -383,6 +426,9 @@ export const ExportDialog = ({
       }
     }
 
+    // Ripristina il contesto dopo aver applicato gli effetti
+    ctx.restore();
+
     // OTTIMIZZAZIONE: Traccia performance
     const frameTime = performance.now() - perf.frameStartTime;
     perf.totalFrameTime += frameTime;
@@ -392,14 +438,16 @@ export const ExportDialog = ({
     if (frameTime > 33) { // Se impiega più di 33ms (30fps)
       perf.droppedFrames++;
     }
-  }, [timelineItems]);
+  }, [timelineItems, calculateGlobalAlpha]);
 
   // OTTIMIZZAZIONE: Sync audio migliorato
   const syncAudio = useCallback((time: number, audioNodes: any[]) => {
-    if (cancelledRef.current) return;
+    if (cancelledRef.current || completedRef.current) return;
 
     const activeItems = timelineItems.filter(item =>
-      time >= item.startTime && time < item.startTime + item.duration
+      item.mediaFile.type !== 'effect' &&
+      time >= item.startTime && 
+      time < item.startTime + item.duration
     );
 
     audioNodes.forEach((node, index) => {
@@ -426,15 +474,9 @@ export const ExportDialog = ({
             node.element.play().catch(() => {});
           }
           
-          // Fade in/out per transizioni smooth
-          const fadeMargin = 0.1;
-          if (relativeTime < fadeMargin) {
-            node.gainNode.gain.value = relativeTime / fadeMargin;
-          } else if (relativeTime > item.duration - fadeMargin) {
-            node.gainNode.gain.value = (item.duration - relativeTime) / fadeMargin;
-          } else {
-            node.gainNode.gain.value = 1.0;
-          }
+          // Applica effetti fade anche all'audio
+          const globalAlpha = calculateGlobalAlpha(time);
+          node.gainNode.gain.value = globalAlpha;
         } else {
           node.element.pause();
           node.gainNode.gain.value = 0;
@@ -444,7 +486,7 @@ export const ExportDialog = ({
         node.gainNode.gain.value = 0;
       }
     });
-  }, [timelineItems]);
+  }, [timelineItems, calculateGlobalAlpha]);
 
   // OTTIMIZZAZIONE: Cleanup completo delle risorse
   const cleanupResources = useCallback(() => {
@@ -503,6 +545,8 @@ export const ExportDialog = ({
 
     // Reset refs
     recordedChunksRef.current = [];
+    renderingRef.current = false;
+    completedRef.current = false;
     performanceRef.current = {
       frameStartTime: 0,
       totalFrameTime: 0,
@@ -511,11 +555,12 @@ export const ExportDialog = ({
     };
   }, [exportedVideoUrl]);
 
-  // OTTIMIZZAZIONE: Processo di export migliorato
+  // RISOLTO: Processo di export con stop corretto
   const exportVideo = useCallback(async () => {
     try {
-      if (cancelledRef.current) return;
+      if (cancelledRef.current || renderingRef.current || completedRef.current) return;
 
+      renderingRef.current = true;
       setStatus('preparing');
       setProgress(0);
 
@@ -579,11 +624,15 @@ export const ExportDialog = ({
       };
 
       mediaRecorder.onstop = () => {
-        if (!cancelledRef.current) {
+        if (!cancelledRef.current && !completedRef.current) {
+          completedRef.current = true;
+          renderingRef.current = false;
+          
           const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
           const url = URL.createObjectURL(blob);
           setExportedVideoUrl(url);
           setStatus('completed');
+          setProgress(100);
 
           // Performance report
           const perf = performanceRef.current;
@@ -603,13 +652,15 @@ export const ExportDialog = ({
       mediaRecorder.onerror = (error) => {
         console.error('MediaRecorder error:', error);
         if (!cancelledRef.current) {
+          completedRef.current = true;
+          renderingRef.current = false;
           setStatus('error');
         }
       };
 
       mediaRecorder.start();
 
-      // OTTIMIZZAZIONE: Rendering loop con timing adattivo
+      // RISOLTO: Rendering loop con stop definitivo
       const totalFrames = Math.ceil(exportDuration * targetFPS);
       const frameInterval = 1000 / targetFPS;
       let currentFrame = 0;
@@ -625,11 +676,13 @@ export const ExportDialog = ({
       };
 
       const renderLoop = async () => {
-        if (cancelledRef.current || currentFrame >= totalFrames) {
-          if (!cancelledRef.current) {
+        // CRITICO: Controlli multipli per fermare il loop
+        if (cancelledRef.current || completedRef.current || currentFrame >= totalFrames) {
+          if (!cancelledRef.current && !completedRef.current && mediaRecorder.state === 'recording') {
+            completedRef.current = true;
             mediaRecorder.stop();
           }
-          return;
+          return; // STOP DEFINITIVO
         }
 
         const currentTime = currentFrame / targetFPS;
@@ -643,7 +696,7 @@ export const ExportDialog = ({
         // Render frame
         await renderFrame(currentTime, ctx, canvas);
 
-        if (cancelledRef.current) return;
+        if (cancelledRef.current || completedRef.current) return; // STOP IMMEDIATO
 
         currentFrame++;
         const progressPercent = (currentFrame / totalFrames) * 100;
@@ -654,12 +707,24 @@ export const ExportDialog = ({
           setEstimatedTime(estimateRemainingTime());
         }
 
+        // CRITICO: Verifica se abbiamo finito prima di programmare il prossimo frame
+        if (currentFrame >= totalFrames) {
+          if (!completedRef.current && mediaRecorder.state === 'recording') {
+            completedRef.current = true;
+            mediaRecorder.stop();
+          }
+          return; // STOP DEFINITIVO
+        }
+
         // OTTIMIZZAZIONE: Timing adattivo
         const frameTime = performance.now() - frameStart;
         const targetFrameTime = frameInterval;
         const delay = Math.max(0, targetFrameTime - frameTime);
 
-        timeoutRef.current = setTimeout(renderLoop, delay);
+        // Programma il prossimo frame solo se non abbiamo finito
+        if (!cancelledRef.current && !completedRef.current) {
+          timeoutRef.current = setTimeout(renderLoop, delay);
+        }
       };
 
       renderLoop();
@@ -667,6 +732,8 @@ export const ExportDialog = ({
     } catch (error) {
       console.error('Export failed:', error);
       if (!cancelledRef.current) {
+        completedRef.current = true;
+        renderingRef.current = false;
         setStatus('error');
       }
     }
@@ -675,7 +742,7 @@ export const ExportDialog = ({
   // Gestione apertura/chiusura dialog
   useEffect(() => {
     if (!isOpen) {
-      cancelledRef.current = false;
+      cancelledRef.current = true;
       cleanupResources();
       setProgress(0);
       setStatus('preparing');
@@ -685,6 +752,8 @@ export const ExportDialog = ({
     }
 
     cancelledRef.current = false;
+    completedRef.current = false;
+    renderingRef.current = false;
     setProgress(0);
     setStatus('preparing');
     setExportedVideoUrl(null);
@@ -692,7 +761,7 @@ export const ExportDialog = ({
 
     // Avvia export dopo un breve delay
     const startExport = setTimeout(() => {
-      if (!cancelledRef.current) {
+      if (!cancelledRef.current && !renderingRef.current) {
         exportVideo();
       }
     }, 500);
@@ -705,6 +774,8 @@ export const ExportDialog = ({
   // Gestione annullamento
   const handleCancel = useCallback(() => {
     cancelledRef.current = true;
+    completedRef.current = true;
+    renderingRef.current = false;
     cleanupResources();
     setProgress(0);
     setStatus('preparing');
