@@ -40,7 +40,6 @@ export const ExportDialog = ({
   const cancelledRef = useRef<boolean>(false);
   const timeoutRef = useRef<number | null>(null);
   const renderingRef = useRef<boolean>(false);
-  const exportCompletedRef = useRef<boolean>(false); // Flag semplice per il completamento
   
   // OTTIMIZZAZIONE: Cache unificata per tutti i media elements
   const mediaCache = useRef<MediaElementCache>({
@@ -546,7 +545,6 @@ export const ExportDialog = ({
     // Reset refs
     recordedChunksRef.current = [];
     renderingRef.current = false;
-    exportCompletedRef.current = false;
     performanceRef.current = {
       frameStartTime: 0,
       totalFrameTime: 0,
@@ -558,7 +556,7 @@ export const ExportDialog = ({
   // RISOLTO: Processo di export con stop corretto
   const exportVideo = useCallback(async () => {
     try {
-      if (cancelledRef.current || renderingRef.current || exportCompletedRef.current) return;
+      if (cancelledRef.current || renderingRef.current) return;
 
       renderingRef.current = true;
       setStatus('preparing');
@@ -624,15 +622,9 @@ export const ExportDialog = ({
       };
 
       mediaRecorder.onstop = () => {
-        // Esegui SOLO se non abbiamo già completato
-        if (!exportCompletedRef.current && !cancelledRef.current) {
-          exportCompletedRef.current = true; // Segna come completato
-          
+        if (!cancelledRef.current) {
           const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
           const url = URL.createObjectURL(blob);
-          setExportedVideoUrl(url);
-          setStatus('completed');
-          setProgress(100);
 
           // Performance report
           const perf = performanceRef.current;
@@ -646,8 +638,13 @@ export const ExportDialog = ({
           document.body.appendChild(link);
           link.click();
           document.body.removeChild(link);
+
+          // Cleanup e chiusura automatica dopo un breve delay
+          setTimeout(() => {
+            URL.revokeObjectURL(url);
+            onClose(); // Chiude automaticamente il dialog
+          }, 1000);
         }
-        renderingRef.current = false;
       };
 
       mediaRecorder.onerror = (error) => {
@@ -676,17 +673,17 @@ export const ExportDialog = ({
       };
 
       const renderLoop = async () => {
-        // Stop immediato se cancellato o già completato
-        if (cancelledRef.current || exportCompletedRef.current) {
+        // Stop se cancellato
+        if (cancelledRef.current) {
           return;
         }
 
-        // Se abbiamo finito tutti i frames, ferma il MediaRecorder UNA volta
+        // Se abbiamo finito tutti i frames, ferma il MediaRecorder
         if (currentFrame >= totalFrames) {
-          if (!exportCompletedRef.current && mediaRecorder.state === 'recording') {
-            mediaRecorder.stop(); // Chiama stop UNA volta
+          if (mediaRecorder.state === 'recording') {
+            mediaRecorder.stop();
           }
-          return; // STOP qui, non programmare più frame
+          return;
         }
 
         const currentTime = currentFrame / targetFPS;
@@ -699,8 +696,7 @@ export const ExportDialog = ({
         // Render frame
         await renderFrame(currentTime, ctx, canvas);
 
-        // Stop se cancellato dopo il rendering
-        if (cancelledRef.current || exportCompletedRef.current) return;
+        if (cancelledRef.current) return;
 
         currentFrame++;
         const progressPercent = (currentFrame / totalFrames) * 100;
@@ -711,9 +707,8 @@ export const ExportDialog = ({
           setEstimatedTime(estimateRemainingTime());
         }
 
-        // Programma il prossimo frame SOLO se non abbiamo finito
-        const frameTime = performance.now() - performance.now(); // Timing semplificato
-        timeoutRef.current = setTimeout(renderLoop, 33); // 30fps fisso per semplicità
+        // Programma il prossimo frame
+        timeoutRef.current = setTimeout(renderLoop, 33);
       };
 
       renderLoop();
@@ -741,7 +736,6 @@ export const ExportDialog = ({
 
     cancelledRef.current = false;
     renderingRef.current = false;
-    exportCompletedRef.current = false;
     setProgress(0);
     setStatus('preparing');
     setExportedVideoUrl(null);
@@ -762,7 +756,6 @@ export const ExportDialog = ({
   // Gestione annullamento
   const handleCancel = useCallback(() => {
     cancelledRef.current = true;
-    exportCompletedRef.current = true; // Ferma tutto
     renderingRef.current = false;
     cleanupResources();
     setProgress(0);
@@ -886,38 +879,12 @@ export const ExportDialog = ({
 
             {/* Action Buttons */}
             <div className="flex justify-end gap-2">
-              {status === 'completed' && exportedVideoUrl && (
-                <Button
-                  onClick={() => {
-                    const link = document.createElement('a');
-                    link.href = exportedVideoUrl;
-                    link.download = `video-export-${aspectRatio}-${Date.now()}.webm`;
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
-                  }}
-                  variant="outline"
-                  size="sm"
-                >
-                  <Download className="w-4 h-4 mr-2" />
-                  Download Again
-                </Button>
-              )}
-              
               <Button
                 onClick={handleClose}
-                variant={status === 'completed' ? 'default' : 'outline'}
+                variant="outline"
                 size="sm"
               >
-                {status === 'preparing' || status === 'rendering' ? (
-                  'Cancel'
-                ) : status === 'completed' ? (
-                  'Done'
-                ) : cancelledRef.current ? (
-                  'Close'
-                ) : (
-                  'Close'
-                )}
+                {status === 'preparing' || status === 'rendering' ? 'Cancel' : 'Close'}
               </Button>
             </div>
           </div>
