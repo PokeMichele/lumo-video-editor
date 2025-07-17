@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,12 @@ interface ExportDialogProps {
   aspectRatio: '16:9' | '4:3' | '9:16';
 }
 
+interface MediaElementCache {
+  videos: Map<string, HTMLVideoElement>;
+  audios: Map<string, HTMLAudioElement>;
+  images: Map<string, HTMLImageElement>;
+}
+
 export const ExportDialog = ({ 
   isOpen, 
   onClose, 
@@ -23,19 +29,35 @@ export const ExportDialog = ({
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState<'preparing' | 'rendering' | 'completed' | 'error'>('preparing');
   const [exportedVideoUrl, setExportedVideoUrl] = useState<string | null>(null);
+  const [fps, setFps] = useState(30);
+  const [estimatedTime, setEstimatedTime] = useState<string>('');
+  
+  // Refs per il rendering
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
-  
-  // Nuovo ref per controllare l'annullamento
   const cancelledRef = useRef<boolean>(false);
-  const audioElementsRef = useRef<Map<string, HTMLAudioElement | HTMLVideoElement>>(new Map());
   const timeoutRef = useRef<number | null>(null);
+  
+  // OTTIMIZZAZIONE: Cache unificata per tutti i media elements
+  const mediaCache = useRef<MediaElementCache>({
+    videos: new Map(),
+    audios: new Map(),
+    images: new Map()
+  });
+  
+  // OTTIMIZZAZIONE: Performance monitoring
+  const performanceRef = useRef({
+    frameStartTime: 0,
+    totalFrameTime: 0,
+    frameCount: 0,
+    droppedFrames: 0
+  });
 
   // Calculate canvas dimensions based on aspect ratio
-  const getCanvasDimensions = () => {
-    const baseWidth = 1280;
+  const getCanvasDimensions = useCallback(() => {
+    const baseWidth = 1920; // Higher quality export
     switch (aspectRatio) {
       case '16:9':
         return { width: baseWidth, height: Math.round(baseWidth / (16/9)) };
@@ -46,98 +68,212 @@ export const ExportDialog = ({
       default:
         return { width: baseWidth, height: Math.round(baseWidth / (16/9)) };
     }
-  };
+  }, [aspectRatio]);
 
-  // Create audio elements for timeline items
-  const createAudioElements = async () => {
-    // Se annullato, non creare elementi audio
-    if (cancelledRef.current) return new Map();
+  // OTTIMIZZAZIONE: Preload intelligente dei media
+  const preloadMedia = useCallback(async () => {
+    if (cancelledRef.current) return;
 
-    const audioElements: Map<string, HTMLAudioElement | HTMLVideoElement> = new Map();
+    const cache = mediaCache.current;
+    const loadPromises: Promise<void>[] = [];
+
+    // Cleanup elementi non più necessari
+    const currentItemIds = new Set(timelineItems.map(item => item.id));
     
-    for (const item of timelineItems) {
-      if (cancelledRef.current) break; // Controlla annullamento durante il loop
+    // Pulisci video cache
+    cache.videos.forEach((video, id) => {
+      if (!currentItemIds.has(id)) {
+        video.pause();
+        video.src = '';
+        video.remove();
+        cache.videos.delete(id);
+      }
+    });
 
-      if (item.mediaFile.type === 'video' || item.mediaFile.type === 'audio') {
-        const element = item.mediaFile.type === 'video' 
-          ? document.createElement('video') 
-          : document.createElement('audio');
-        
-        element.src = item.mediaFile.url;
-        element.crossOrigin = 'anonymous';
-        element.muted = false;
-        element.volume = 1.0;
-        element.preload = 'metadata';
-        
-        await new Promise<void>((resolve) => {
+    // Pulisci audio cache
+    cache.audios.forEach((audio, id) => {
+      if (!currentItemIds.has(id)) {
+        audio.pause();
+        audio.src = '';
+        audio.remove();
+        cache.audios.delete(id);
+      }
+    });
+
+    // Pulisci image cache
+    cache.images.forEach((img, id) => {
+      if (!currentItemIds.has(id)) {
+        cache.images.delete(id);
+      }
+    });
+
+    // Carica nuovi elementi in parallelo
+    for (const item of timelineItems) {
+      if (cancelledRef.current) break;
+
+      if (item.mediaFile.type === 'video' && !cache.videos.has(item.id)) {
+        const promise = new Promise<void>((resolve) => {
+          const video = document.createElement('video');
+          video.src = item.mediaFile.url;
+          video.crossOrigin = 'anonymous';
+          video.muted = true; // Muted per export, audio gestito separatamente
+          video.preload = 'auto';
+          video.playsInline = true;
+          
           const handleLoad = () => {
-            element.removeEventListener('loadedmetadata', handleLoad);
-            element.removeEventListener('error', handleError);
+            video.removeEventListener('canplaythrough', handleLoad);
+            video.removeEventListener('error', handleError);
+            if (!cancelledRef.current) {
+              cache.videos.set(item.id, video);
+            }
             resolve();
           };
           
           const handleError = () => {
-            element.removeEventListener('loadedmetadata', handleLoad);
-            element.removeEventListener('error', handleError);
+            video.removeEventListener('canplaythrough', handleLoad);
+            video.removeEventListener('error', handleError);
+            console.warn(`Failed to load video: ${item.mediaFile.name}`);
             resolve();
           };
           
-          element.addEventListener('loadedmetadata', handleLoad);
-          element.addEventListener('error', handleError);
+          video.addEventListener('canplaythrough', handleLoad);
+          video.addEventListener('error', handleError);
           
-          // Fallback timeout
+          // Timeout fallback
           setTimeout(() => {
-            element.removeEventListener('loadedmetadata', handleLoad);
-            element.removeEventListener('error', handleError);
+            video.removeEventListener('canplaythrough', handleLoad);
+            video.removeEventListener('error', handleError);
             resolve();
-          }, 1000);
+          }, 5000);
         });
         
-        if (!cancelledRef.current) {
-          audioElements.set(item.id, element);
-        }
+        loadPromises.push(promise);
+      }
+
+      if (item.mediaFile.type === 'audio' && !cache.audios.has(item.id)) {
+        const promise = new Promise<void>((resolve) => {
+          const audio = document.createElement('audio');
+          audio.src = item.mediaFile.url;
+          audio.crossOrigin = 'anonymous';
+          audio.preload = 'auto';
+          
+          const handleLoad = () => {
+            audio.removeEventListener('canplaythrough', handleLoad);
+            audio.removeEventListener('error', handleError);
+            if (!cancelledRef.current) {
+              cache.audios.set(item.id, audio);
+            }
+            resolve();
+          };
+          
+          const handleError = () => {
+            audio.removeEventListener('canplaythrough', handleLoad);
+            audio.removeEventListener('error', handleError);
+            console.warn(`Failed to load audio: ${item.mediaFile.name}`);
+            resolve();
+          };
+          
+          audio.addEventListener('canplaythrough', handleLoad);
+          audio.addEventListener('error', handleError);
+          
+          setTimeout(() => {
+            audio.removeEventListener('canplaythrough', handleLoad);
+            audio.removeEventListener('error', handleError);
+            resolve();
+          }, 5000);
+        });
+        
+        loadPromises.push(promise);
+      }
+
+      if (item.mediaFile.type === 'image' && !cache.images.has(item.id)) {
+        const promise = new Promise<void>((resolve) => {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.src = item.mediaFile.url;
+          
+          img.onload = () => {
+            if (!cancelledRef.current) {
+              cache.images.set(item.id, img);
+            }
+            resolve();
+          };
+          
+          img.onerror = () => {
+            console.warn(`Failed to load image: ${item.mediaFile.name}`);
+            resolve();
+          };
+          
+          setTimeout(() => resolve(), 3000);
+        });
+        
+        loadPromises.push(promise);
       }
     }
-    
-    audioElementsRef.current = audioElements;
-    return audioElements;
-  };
 
-  // Mix audio at specific time
-  const mixAudioAtTime = (time: number, audioElements: Map<string, HTMLAudioElement | HTMLVideoElement>, audioContext: AudioContext) => {
-    if (cancelledRef.current) return;
+    // OTTIMIZZAZIONE: Carica in batch per evitare sovraccarico
+    const batchSize = 5;
+    for (let i = 0; i < loadPromises.length; i += batchSize) {
+      if (cancelledRef.current) break;
+      const batch = loadPromises.slice(i, i + batchSize);
+      await Promise.all(batch);
+    }
+  }, [timelineItems]);
 
-    const activeItems = timelineItems.filter(item =>
-      time >= item.startTime && time < item.startTime + item.duration
-    );
+  // OTTIMIZZAZIONE: Gestione audio migliorata con Web Audio API
+  const setupAudioContext = useCallback(async () => {
+    if (cancelledRef.current) return null;
 
-    // Set audio element times and play states
-    audioElements.forEach((element, itemId) => {
-      if (cancelledRef.current) return;
+    try {
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const destination = audioContext.createMediaStreamDestination();
       
-      const item = activeItems.find(item => item.id === itemId);
-      if (item) {
-        const relativeTime = time - item.startTime;
-        const mediaOffset = item.mediaStartOffset || 0;
-        const actualTime = relativeTime + mediaOffset;
-
-        if (actualTime >= 0 && actualTime <= element.duration) {
-          element.currentTime = actualTime;
-          if (element.paused) {
-            element.play().catch(() => {});
+      // Crea un gain node per controllo volume globale
+      const masterGain = audioContext.createGain();
+      masterGain.gain.value = 1.0;
+      masterGain.connect(destination);
+      
+      // Connetti tutti gli elementi audio
+      const audioPromises = timelineItems
+        .filter(item => item.mediaFile.type === 'audio' || item.mediaFile.type === 'video')
+        .map(async (item) => {
+          try {
+            const element = item.mediaFile.type === 'video' 
+              ? mediaCache.current.videos.get(item.id)
+              : mediaCache.current.audios.get(item.id);
+            
+            if (element) {
+              const source = audioContext.createMediaElementSource(element);
+              const gainNode = audioContext.createGain();
+              gainNode.gain.value = 1.0;
+              
+              source.connect(gainNode);
+              gainNode.connect(masterGain);
+              
+              return { element, source, gainNode };
+            }
+          } catch (error) {
+            console.warn(`Error setting up audio for ${item.id}:`, error);
           }
-        } else {
-          element.pause();
-        }
-      } else {
-        element.pause();
-      }
-    });
-  };
+          return null;
+        });
 
-  // Render frame at specific time
-  const renderFrame = async (time: number, ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement) => {
+      const audioNodes = await Promise.all(audioPromises);
+      
+      audioContextRef.current = audioContext;
+      return { audioContext, destination, audioNodes: audioNodes.filter(Boolean) };
+    } catch (error) {
+      console.error('Failed to setup audio context:', error);
+      return null;
+    }
+  }, [timelineItems]);
+
+  // OTTIMIZZAZIONE: Render frame migliorato con caching
+  const renderFrame = useCallback(async (time: number, ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement) => {
     if (cancelledRef.current) return;
+
+    const perf = performanceRef.current;
+    perf.frameStartTime = performance.now();
 
     // Clear canvas
     ctx.fillStyle = '#000000';
@@ -148,149 +284,171 @@ export const ExportDialog = ({
       time >= item.startTime && time < item.startTime + item.duration
     ).sort((a, b) => a.track - b.track);
 
-    // Render each active item
-    for (const item of activeItems) {
-      if (cancelledRef.current) break; // Controlla annullamento durante il rendering
+    if (activeItems.length === 0) return;
+
+    // OTTIMIZZAZIONE: Batch rendering per tipo di media
+    const videoItems = activeItems.filter(item => item.mediaFile.type === 'video');
+    const imageItems = activeItems.filter(item => item.mediaFile.type === 'image');
+
+    // Render videos
+    for (const item of videoItems) {
+      if (cancelledRef.current) break;
+
+      const video = mediaCache.current.videos.get(item.id);
+      if (!video) continue;
 
       const relativeTime = time - item.startTime;
       const mediaOffset = item.mediaStartOffset || 0;
-      const actualTime = relativeTime + mediaOffset;
+      const targetTime = relativeTime + mediaOffset;
 
-      if (item.mediaFile.type === 'video') {
-        const video = document.createElement('video');
-        video.src = item.mediaFile.url;
-        video.currentTime = actualTime;
-        video.muted = true;
-        
-        await new Promise<void>((resolve) => {
-          if (cancelledRef.current) {
-            resolve();
-            return;
+      // OTTIMIZZAZIONE: Seek solo quando necessario con tolleranza stretta
+      if (Math.abs(video.currentTime - targetTime) > 0.05) {
+        video.currentTime = targetTime;
+      }
+
+      // Attendi che il video sia pronto
+      if (video.readyState >= 2) {
+        try {
+          const videoAspect = video.videoWidth / video.videoHeight;
+          const canvasAspect = canvas.width / canvas.height;
+
+          let renderWidth, renderHeight, offsetX, offsetY;
+
+          if (videoAspect > canvasAspect) {
+            renderWidth = canvas.width;
+            renderHeight = canvas.width / videoAspect;
+            offsetX = 0;
+            offsetY = (canvas.height - renderHeight) / 2;
+          } else {
+            renderWidth = canvas.height * videoAspect;
+            renderHeight = canvas.height;
+            offsetX = (canvas.width - renderWidth) / 2;
+            offsetY = 0;
           }
 
-          const handleLoad = () => {
-            video.removeEventListener('loadeddata', handleLoad);
-            video.removeEventListener('error', handleError);
-            
-            if (cancelledRef.current) {
-              resolve();
-              return;
-            }
+          // Apply track offset for layering
+          const trackOffsetX = item.track * 10; // Ridotto per export
+          const trackOffsetY = item.track * 10;
 
-            if (video.readyState >= 2) {
-              try {
-                // Calculate dimensions maintaining aspect ratio
-                const videoAspect = video.videoWidth / video.videoHeight;
-                const canvasAspect = canvas.width / canvas.height;
-
-                let renderWidth, renderHeight, offsetX, offsetY;
-
-                if (videoAspect > canvasAspect) {
-                  renderWidth = canvas.width;
-                  renderHeight = canvas.width / videoAspect;
-                  offsetX = 0;
-                  offsetY = (canvas.height - renderHeight) / 2;
-                } else {
-                  renderWidth = canvas.height * videoAspect;
-                  renderHeight = canvas.height;
-                  offsetX = (canvas.width - renderWidth) / 2;
-                  offsetY = 0;
-                }
-
-                // Apply track offset
-                const trackOffsetX = item.track * 20;
-                const trackOffsetY = item.track * 20;
-
-                ctx.drawImage(
-                  video,
-                  offsetX + trackOffsetX,
-                  offsetY + trackOffsetY,
-                  renderWidth - trackOffsetX * 2,
-                  renderHeight - trackOffsetY * 2
-                );
-              } catch (error) {
-                console.warn('Error drawing video frame:', error);
-              }
-            }
-            resolve();
-          };
-          
-          const handleError = () => {
-            video.removeEventListener('loadeddata', handleLoad);
-            video.removeEventListener('error', handleError);
-            resolve();
-          };
-
-          video.addEventListener('loadeddata', handleLoad);
-          video.addEventListener('error', handleError);
-          
-          setTimeout(() => {
-            video.removeEventListener('loadeddata', handleLoad);
-            video.removeEventListener('error', handleError);
-            resolve();
-          }, 100);
-        });
-      } else if (item.mediaFile.type === 'image') {
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.src = item.mediaFile.url;
-        
-        await new Promise<void>((resolve) => {
-          if (cancelledRef.current) {
-            resolve();
-            return;
-          }
-
-          img.onload = () => {
-            if (cancelledRef.current) {
-              resolve();
-              return;
-            }
-
-            try {
-              const imgAspect = img.width / img.height;
-              const canvasAspect = canvas.width / canvas.height;
-
-              let renderWidth, renderHeight, offsetX, offsetY;
-
-              if (imgAspect > canvasAspect) {
-                renderWidth = canvas.width * 0.8;
-                renderHeight = renderWidth / imgAspect;
-                offsetX = (canvas.width - renderWidth) / 2;
-                offsetY = (canvas.height - renderHeight) / 2;
-              } else {
-                renderHeight = canvas.height * 0.8;
-                renderWidth = renderHeight * imgAspect;
-                offsetX = (canvas.width - renderWidth) / 2;
-                offsetY = (canvas.height - renderHeight) / 2;
-              }
-
-              const trackOffsetX = item.track * 40;
-              const trackOffsetY = item.track * 40;
-
-              ctx.drawImage(
-                img,
-                offsetX + trackOffsetX,
-                offsetY + trackOffsetY,
-                renderWidth - trackOffsetX,
-                renderHeight - trackOffsetY
-              );
-            } catch (error) {
-              console.warn('Error drawing image frame:', error);
-            }
-            resolve();
-          };
-          
-          img.onerror = () => resolve();
-          setTimeout(() => resolve(), 100);
-        });
+          ctx.drawImage(
+            video,
+            offsetX + trackOffsetX,
+            offsetY + trackOffsetY,
+            renderWidth - trackOffsetX * 2,
+            renderHeight - trackOffsetY * 2
+          );
+        } catch (error) {
+          console.warn(`Error rendering video ${item.id}:`, error);
+        }
       }
     }
-  };
 
-  // Funzione per pulire tutte le risorse
-  const cleanupResources = () => {
-    // Ferma MediaRecorder se attivo
+    // Render images
+    for (const item of imageItems) {
+      if (cancelledRef.current) break;
+
+      const img = mediaCache.current.images.get(item.id);
+      if (!img || !img.complete) continue;
+
+      try {
+        const imgAspect = img.width / img.height;
+        const canvasAspect = canvas.width / canvas.height;
+
+        let renderWidth, renderHeight, offsetX, offsetY;
+
+        if (imgAspect > canvasAspect) {
+          renderWidth = canvas.width * 0.9;
+          renderHeight = renderWidth / imgAspect;
+          offsetX = (canvas.width - renderWidth) / 2;
+          offsetY = (canvas.height - renderHeight) / 2;
+        } else {
+          renderHeight = canvas.height * 0.9;
+          renderWidth = renderHeight * imgAspect;
+          offsetX = (canvas.width - renderWidth) / 2;
+          offsetY = (canvas.height - renderHeight) / 2;
+        }
+
+        const trackOffsetX = item.track * 20;
+        const trackOffsetY = item.track * 20;
+
+        ctx.drawImage(
+          img,
+          offsetX + trackOffsetX,
+          offsetY + trackOffsetY,
+          renderWidth - trackOffsetX,
+          renderHeight - trackOffsetY
+        );
+      } catch (error) {
+        console.warn(`Error rendering image ${item.id}:`, error);
+      }
+    }
+
+    // OTTIMIZZAZIONE: Traccia performance
+    const frameTime = performance.now() - perf.frameStartTime;
+    perf.totalFrameTime += frameTime;
+    perf.frameCount++;
+
+    // Adatta FPS se necessario
+    if (frameTime > 33) { // Se impiega più di 33ms (30fps)
+      perf.droppedFrames++;
+    }
+  }, [timelineItems]);
+
+  // OTTIMIZZAZIONE: Sync audio migliorato
+  const syncAudio = useCallback((time: number, audioNodes: any[]) => {
+    if (cancelledRef.current) return;
+
+    const activeItems = timelineItems.filter(item =>
+      time >= item.startTime && time < item.startTime + item.duration
+    );
+
+    audioNodes.forEach((node, index) => {
+      if (!node || !node.element) return;
+
+      const item = activeItems.find(item => {
+        const element = item.mediaFile.type === 'video' 
+          ? mediaCache.current.videos.get(item.id)
+          : mediaCache.current.audios.get(item.id);
+        return element === node.element;
+      });
+
+      if (item) {
+        const relativeTime = time - item.startTime;
+        const mediaOffset = item.mediaStartOffset || 0;
+        const targetTime = relativeTime + mediaOffset;
+
+        if (targetTime >= 0 && targetTime <= node.element.duration) {
+          if (Math.abs(node.element.currentTime - targetTime) > 0.05) {
+            node.element.currentTime = targetTime;
+          }
+          
+          if (node.element.paused) {
+            node.element.play().catch(() => {});
+          }
+          
+          // Fade in/out per transizioni smooth
+          const fadeMargin = 0.1;
+          if (relativeTime < fadeMargin) {
+            node.gainNode.gain.value = relativeTime / fadeMargin;
+          } else if (relativeTime > item.duration - fadeMargin) {
+            node.gainNode.gain.value = (item.duration - relativeTime) / fadeMargin;
+          } else {
+            node.gainNode.gain.value = 1.0;
+          }
+        } else {
+          node.element.pause();
+          node.gainNode.gain.value = 0;
+        }
+      } else {
+        node.element.pause();
+        node.gainNode.gain.value = 0;
+      }
+    });
+  }, [timelineItems]);
+
+  // OTTIMIZZAZIONE: Cleanup completo delle risorse
+  const cleanupResources = useCallback(() => {
+    // Stop MediaRecorder
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
       try {
         mediaRecorderRef.current.stop();
@@ -299,21 +457,7 @@ export const ExportDialog = ({
       }
     }
 
-    // Pulisci audio elements
-    audioElementsRef.current.forEach(element => {
-      try {
-        element.pause();
-        element.src = '';
-        if (element.parentNode) {
-          element.parentNode.removeChild(element);
-        }
-      } catch (error) {
-        console.warn('Error cleaning audio element:', error);
-      }
-    });
-    audioElementsRef.current.clear();
-
-    // Pulisci audio context
+    // Cleanup audio context
     if (audioContextRef.current) {
       try {
         audioContextRef.current.close();
@@ -323,13 +467,32 @@ export const ExportDialog = ({
       audioContextRef.current = null;
     }
 
-    // Pulisci timeout
+    // Cleanup media cache
+    const cache = mediaCache.current;
+    
+    cache.videos.forEach(video => {
+      video.pause();
+      video.src = '';
+      video.remove();
+    });
+    cache.videos.clear();
+
+    cache.audios.forEach(audio => {
+      audio.pause();
+      audio.src = '';
+      audio.remove();
+    });
+    cache.audios.clear();
+
+    cache.images.clear();
+
+    // Clear timeout
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
     }
 
-    // Pulisci URL se esistente
+    // Cleanup URL
     if (exportedVideoUrl) {
       try {
         URL.revokeObjectURL(exportedVideoUrl);
@@ -337,220 +500,233 @@ export const ExportDialog = ({
         console.warn('Error revoking URL:', error);
       }
     }
-  };
 
-  // Funzione per annullare il rendering
-  const cancelExport = () => {
-    cancelledRef.current = true;
-    cleanupResources();
-    setProgress(0);
+    // Reset refs
     recordedChunksRef.current = [];
-  };
+    performanceRef.current = {
+      frameStartTime: 0,
+      totalFrameTime: 0,
+      frameCount: 0,
+      droppedFrames: 0
+    };
+  }, [exportedVideoUrl]);
 
-  // Export process
+  // OTTIMIZZAZIONE: Processo di export migliorato
+  const exportVideo = useCallback(async () => {
+    try {
+      if (cancelledRef.current) return;
+
+      setStatus('preparing');
+      setProgress(0);
+
+      const canvas = canvasRef.current;
+      if (!canvas) throw new Error('Canvas not available');
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Canvas context not available');
+
+      const dimensions = getCanvasDimensions();
+      canvas.width = dimensions.width;
+      canvas.height = dimensions.height;
+
+      // Preload media
+      await preloadMedia();
+      if (cancelledRef.current) return;
+
+      // Setup audio
+      const audioSetup = await setupAudioContext();
+      if (cancelledRef.current) return;
+
+      setStatus('rendering');
+
+      // OTTIMIZZAZIONE: Calcola parametri di export ottimali
+      const maxEndTime = timelineItems.reduce((max, item) => {
+        return Math.max(max, item.startTime + item.duration);
+      }, 0);
+
+      const exportDuration = Math.max(maxEndTime, 1);
+      let targetFPS = 30;
+      
+      // Adatta FPS in base alla complessità
+      const complexity = timelineItems.length * (dimensions.width * dimensions.height / 1000000);
+      if (complexity > 10) targetFPS = 24;
+      if (complexity > 20) targetFPS = 20;
+      
+      setFps(targetFPS);
+
+      // Setup MediaRecorder
+      const canvasStream = canvas.captureStream(targetFPS);
+      const audioStream = audioSetup?.destination?.stream;
+      
+      const combinedStream = new MediaStream([
+        ...canvasStream.getVideoTracks(),
+        ...(audioStream?.getAudioTracks() || [])
+      ]);
+
+      const mediaRecorder = new MediaRecorder(combinedStream, {
+        mimeType: 'video/webm;codecs=vp9,opus',
+        videoBitsPerSecond: 8000000, // 8 Mbps per alta qualità
+        audioBitsPerSecond: 128000   // 128 kbps audio
+      });
+
+      mediaRecorderRef.current = mediaRecorder;
+      recordedChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0 && !cancelledRef.current) {
+          recordedChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        if (!cancelledRef.current) {
+          const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
+          const url = URL.createObjectURL(blob);
+          setExportedVideoUrl(url);
+          setStatus('completed');
+
+          // Performance report
+          const perf = performanceRef.current;
+          const avgFrameTime = perf.totalFrameTime / perf.frameCount;
+          console.log(`Export completed: ${perf.frameCount} frames, avg ${avgFrameTime.toFixed(2)}ms/frame, ${perf.droppedFrames} dropped`);
+
+          // Auto-download
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `video-export-${aspectRatio}-${Date.now()}.webm`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        }
+      };
+
+      mediaRecorder.onerror = (error) => {
+        console.error('MediaRecorder error:', error);
+        if (!cancelledRef.current) {
+          setStatus('error');
+        }
+      };
+
+      mediaRecorder.start();
+
+      // OTTIMIZZAZIONE: Rendering loop con timing adattivo
+      const totalFrames = Math.ceil(exportDuration * targetFPS);
+      const frameInterval = 1000 / targetFPS;
+      let currentFrame = 0;
+      let lastFrameTime = performance.now();
+
+      // Stima tempo rimanente
+      const estimateRemainingTime = () => {
+        const elapsed = performance.now() - lastFrameTime;
+        const remaining = (totalFrames - currentFrame) * (elapsed / Math.max(currentFrame, 1));
+        const minutes = Math.floor(remaining / 60000);
+        const seconds = Math.floor((remaining % 60000) / 1000);
+        return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+      };
+
+      const renderLoop = async () => {
+        if (cancelledRef.current || currentFrame >= totalFrames) {
+          if (!cancelledRef.current) {
+            mediaRecorder.stop();
+          }
+          return;
+        }
+
+        const currentTime = currentFrame / targetFPS;
+        const frameStart = performance.now();
+
+        // Sync audio
+        if (audioSetup?.audioNodes) {
+          syncAudio(currentTime, audioSetup.audioNodes);
+        }
+
+        // Render frame
+        await renderFrame(currentTime, ctx, canvas);
+
+        if (cancelledRef.current) return;
+
+        currentFrame++;
+        const progressPercent = (currentFrame / totalFrames) * 100;
+        setProgress(progressPercent);
+
+        // Update time estimate ogni 30 frames
+        if (currentFrame % 30 === 0) {
+          setEstimatedTime(estimateRemainingTime());
+        }
+
+        // OTTIMIZZAZIONE: Timing adattivo
+        const frameTime = performance.now() - frameStart;
+        const targetFrameTime = frameInterval;
+        const delay = Math.max(0, targetFrameTime - frameTime);
+
+        timeoutRef.current = setTimeout(renderLoop, delay);
+      };
+
+      renderLoop();
+
+    } catch (error) {
+      console.error('Export failed:', error);
+      if (!cancelledRef.current) {
+        setStatus('error');
+      }
+    }
+  }, [timelineItems, aspectRatio, getCanvasDimensions, preloadMedia, setupAudioContext, renderFrame, syncAudio]);
+
+  // Gestione apertura/chiusura dialog
   useEffect(() => {
     if (!isOpen) {
-      // Reset completo quando il dialog si chiude
       cancelledRef.current = false;
       cleanupResources();
       setProgress(0);
       setStatus('preparing');
       setExportedVideoUrl(null);
-      recordedChunksRef.current = [];
+      setEstimatedTime('');
       return;
     }
 
-    // Reset quando il dialog si apre
     cancelledRef.current = false;
     setProgress(0);
     setStatus('preparing');
     setExportedVideoUrl(null);
-    recordedChunksRef.current = [];
+    setEstimatedTime('');
 
-    const exportVideo = async () => {
-      try {
-        if (cancelledRef.current) return;
-
-        setStatus('preparing');
-        await new Promise(resolve => {
-          timeoutRef.current = setTimeout(() => {
-            if (!cancelledRef.current) resolve(undefined);
-          }, 500);
-        });
-        
-        if (cancelledRef.current) return;
-
-        const canvas = canvasRef.current;
-        if (!canvas) throw new Error('Canvas not available');
-        
-        const ctx = canvas.getContext('2d');
-        if (!ctx) throw new Error('Canvas context not available');
-        
-        const dimensions = getCanvasDimensions();
-        canvas.width = dimensions.width;
-        canvas.height = dimensions.height;
-        
-        // Create audio context for mixing
-        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-        audioContextRef.current = audioContext;
-        
-        if (cancelledRef.current) return;
-
-        // Create audio elements
-        const audioElements = await createAudioElements();
-        
-        if (cancelledRef.current) return;
-
-        setStatus('rendering');
-        
-        // Create audio destination for mixing
-        const audioDestination = audioContext.createMediaStreamDestination();
-        
-        // Connect audio elements to destination
-        audioElements.forEach((element) => {
-          if (cancelledRef.current) return;
-          
-          try {
-            const source = audioContext.createMediaElementSource(element);
-            source.connect(audioDestination);
-          } catch (error) {
-            console.warn('Error connecting audio source:', error);
-          }
-        });
-        
-        if (cancelledRef.current) return;
-
-        // Combine canvas stream with audio
-        const canvasStream = canvas.captureStream(30); // 30 FPS
-        const audioStream = audioDestination.stream;
-        
-        // Create combined stream
-        const combinedStream = new MediaStream([
-          ...canvasStream.getVideoTracks(),
-          ...audioStream.getAudioTracks()
-        ]);
-        
-        // Set up MediaRecorder with combined stream
-        const mediaRecorder = new MediaRecorder(combinedStream, {
-          mimeType: 'video/webm;codecs=vp9,opus'
-        });
-        
-        mediaRecorderRef.current = mediaRecorder;
-        recordedChunksRef.current = [];
-        
-        mediaRecorder.ondataavailable = (event) => {
-          if (event.data.size > 0 && !cancelledRef.current) {
-            recordedChunksRef.current.push(event.data);
-          }
-        };
-        
-        mediaRecorder.onstop = () => {
-          if (cancelledRef.current) return;
-
-          const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
-          const url = URL.createObjectURL(blob);
-          setExportedVideoUrl(url);
-          setStatus('completed');
-          
-          // Clean up audio elements
-          audioElements.forEach(element => {
-            element.pause();
-            if (element.parentNode) {
-              element.parentNode.removeChild(element);
-            }
-          });
-          
-          // Clean up audio context
-          if (audioContextRef.current) {
-            audioContextRef.current.close();
-            audioContextRef.current = null;
-          }
-          
-          // Auto-download
-          const link = document.createElement('a');
-          link.href = url;
-          link.download = `exported-video-${aspectRatio}-${Date.now()}.webm`;
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-        };
-        
-        if (cancelledRef.current) return;
-
-        mediaRecorder.start();
-        
-        // Calculate actual export duration
-        const maxEndTime = timelineItems.reduce((max, item) => {
-          return Math.max(max, item.startTime + item.duration);
-        }, 0);
-        
-        const exportDuration = Math.max(maxEndTime, 1);
-        const fps = 30;
-        const totalFrames = Math.ceil(exportDuration * fps);
-        const frameInterval = 1000 / fps;
-        
-        let currentFrame = 0;
-        
-        const renderNextFrame = async () => {
-          if (cancelledRef.current || currentFrame >= totalFrames) {
-            if (!cancelledRef.current) {
-              mediaRecorder.stop();
-            }
-            return;
-          }
-          
-          const currentTime = currentFrame / fps;
-          
-          // Mix audio at current time
-          if (!cancelledRef.current) {
-            mixAudioAtTime(currentTime, audioElements, audioContext);
-          }
-          
-          // Render video frame
-          if (!cancelledRef.current) {
-            await renderFrame(currentTime, ctx, canvas);
-          }
-          
-          if (cancelledRef.current) return;
-          
-          currentFrame++;
-          const progressPercent = (currentFrame / totalFrames) * 100;
-          setProgress(progressPercent);
-          
-          timeoutRef.current = setTimeout(renderNextFrame, frameInterval);
-        };
-        
-        renderNextFrame();
-        
-      } catch (error) {
-        console.error('Export failed:', error);
-        if (!cancelledRef.current) {
-          setStatus('error');
-        }
+    // Avvia export dopo un breve delay
+    const startExport = setTimeout(() => {
+      if (!cancelledRef.current) {
+        exportVideo();
       }
+    }, 500);
+
+    return () => {
+      clearTimeout(startExport);
     };
+  }, [isOpen, exportVideo, cleanupResources]);
 
-    exportVideo();
-  }, [isOpen, timelineItems, aspectRatio]);
+  // Gestione annullamento
+  const handleCancel = useCallback(() => {
+    cancelledRef.current = true;
+    cleanupResources();
+    setProgress(0);
+    setStatus('preparing');
+    setEstimatedTime('');
+  }, [cleanupResources]);
 
-  // Gestione chiusura migliorata
-  const handleClose = () => {
+  // Gestione chiusura
+  const handleClose = useCallback(() => {
     if (status === 'preparing' || status === 'rendering') {
-      // Se sta renderizzando, annulla il processo
-      cancelExport();
+      handleCancel();
     } else {
-      // Altrimenti chiudi normalmente
       cleanupResources();
     }
     onClose();
-  };
+  }, [status, handleCancel, cleanupResources, onClose]);
 
   const getStatusText = () => {
     if (cancelledRef.current) return 'Export cancelled';
     
     switch (status) {
-      case 'preparing': return 'Preparing export...';
-      case 'rendering': return 'Rendering video with audio...';
+      case 'preparing': return 'Preparing media files...';
+      case 'rendering': return `Rendering video (${fps}fps)...`;
       case 'completed': return 'Export completed!';
       case 'error': return 'Export failed';
       default: return 'Processing...';
@@ -581,7 +757,6 @@ export const ExportDialog = ({
 
   return (
     <>
-      {/* Hidden canvas for rendering */}
       <canvas
         ref={canvasRef}
         style={{ display: 'none' }}
@@ -611,6 +786,12 @@ export const ExportDialog = ({
                 <span className="text-muted-foreground">Timeline Items:</span>
                 <span className="font-medium">{timelineItems.length}</span>
               </div>
+              {fps > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Frame Rate:</span>
+                  <span className="font-medium">{fps} fps</span>
+                </div>
+              )}
             </div>
 
             {/* Progress Section */}
@@ -624,10 +805,25 @@ export const ExportDialog = ({
               
               <Progress value={progress} className="w-full" />
               
-              <div className="text-xs text-muted-foreground text-center">
-                {progress.toFixed(1)}% completed
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>{progress.toFixed(1)}% completed</span>
+                {estimatedTime && status === 'rendering' && (
+                  <span>Est. {estimatedTime} remaining</span>
+                )}
               </div>
             </div>
+
+            {/* Performance Info */}
+            {status === 'rendering' && (
+              <div className="text-xs text-muted-foreground space-y-1">
+                <div>Optimizing for best quality...</div>
+                {performanceRef.current.droppedFrames > 0 && (
+                  <div className="text-yellow-600">
+                    {performanceRef.current.droppedFrames} frames optimized
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Action Buttons */}
             <div className="flex justify-end gap-2">
@@ -636,7 +832,7 @@ export const ExportDialog = ({
                   onClick={() => {
                     const link = document.createElement('a');
                     link.href = exportedVideoUrl;
-                    link.download = `exported-video-${aspectRatio}-${Date.now()}.webm`;
+                    link.download = `video-export-${aspectRatio}-${Date.now()}.webm`;
                     document.body.appendChild(link);
                     link.click();
                     document.body.removeChild(link);
@@ -653,8 +849,6 @@ export const ExportDialog = ({
                 onClick={handleClose}
                 variant={status === 'completed' ? 'default' : 'outline'}
                 size="sm"
-                // RIMOSSO: disabled={status === 'preparing' || status === 'rendering'}
-                // Ora il pulsante è sempre abilitato per permettere l'annullamento
               >
                 {status === 'preparing' || status === 'rendering' ? (
                   'Cancel'

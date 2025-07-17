@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import { Play, Pause, SkipBack, SkipForward, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -29,11 +29,14 @@ export const CompositeVideoPlayer = ({
   const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
   const imageElementsRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const [volume, setVolume] = useState(100);
-  const lastTimeRef = useRef(currentTime);
-  const previousCurrentTimeRef = useRef(currentTime);
-
-  // Calculate canvas dimensions based on aspect ratio
-  const getCanvasDimensions = () => {
+  
+  // OTTIMIZZAZIONE: Gestione timing migliorata
+  const lastRenderTimeRef = useRef<number>(0);
+  const lastUpdateTimeRef = useRef<number>(performance.now());
+  const needsRenderRef = useRef<boolean>(true);
+  
+  // OTTIMIZZAZIONE: Cache delle dimensioni canvas
+  const canvasDimensions = useMemo(() => {
     const baseWidth = 1280;
     switch (aspectRatio) {
       case '16:9':
@@ -45,245 +48,75 @@ export const CompositeVideoPlayer = ({
       default:
         return { width: baseWidth, height: Math.round(baseWidth / (16/9)) };
     }
-  };
+  }, [aspectRatio]);
 
-  const canvasDimensions = getCanvasDimensions();
-
-  // FIXED: Sincronizza lastTimeRef quando currentTime cambia dall'esterno (manual seek)
-  useEffect(() => {
-    if (Math.abs(currentTime - previousCurrentTimeRef.current) > 0.1) {
-      // Se il currentTime è cambiato significativamente dall'esterno (non dall'animation loop)
-      lastTimeRef.current = currentTime;
-      previousCurrentTimeRef.current = currentTime;
-
-      // Forza la sincronizzazione di tutti i media elements
-      forceSyncAllMedia();
-    } else {
-      previousCurrentTimeRef.current = currentTime;
-    }
-  }, [currentTime]);
-
-  // Trova tutti gli elementi attivi al tempo corrente
-  const getActiveItems = useCallback(() => {
+  // OTTIMIZZAZIONE: Memoizza gli elementi attivi
+  const activeItems = useMemo(() => {
     return timelineItems.filter(item =>
       currentTime >= item.startTime &&
       currentTime < item.startTime + item.duration
-    ).sort((a, b) => a.track - b.track); // Ordina per track (layer inferiore prima)
+    ).sort((a, b) => a.track - b.track);
   }, [timelineItems, currentTime]);
 
-  // FIXED: Funzione per forzare la sincronizzazione di tutti i media
-  const forceSyncAllMedia = useCallback(() => {
-    const activeItems = getActiveItems();
-
-    // Sincronizza tutti i video
-    videoElementsRef.current.forEach((video, itemId) => {
-      const item = activeItems.find(item => item.id === itemId);
-      if (item) {
-        const relativeTime = currentTime - item.startTime;
-        const mediaOffset = item.mediaStartOffset || 0;
-        const actualVideoTime = relativeTime + mediaOffset;
-
-        if (actualVideoTime >= 0 && actualVideoTime <= video.duration) {
-          video.currentTime = actualVideoTime;
-        }
-      }
-    });
-
-    // Sincronizza tutti gli audio
-    audioElementsRef.current.forEach((audio, itemId) => {
-      const item = activeItems.find(item => item.id === itemId);
-      if (item) {
-        const relativeTime = currentTime - item.startTime;
-        const mediaOffset = item.mediaStartOffset || 0;
-        const actualAudioTime = relativeTime + mediaOffset;
-
-        if (actualAudioTime >= 0 && actualAudioTime <= audio.duration) {
-          audio.currentTime = actualAudioTime;
-        }
-      }
-    });
-  }, [currentTime, getActiveItems]);
-
-  // Precarica e gestisce elementi media
-  useEffect(() => {
-    const container = hiddenVideoContainerRef.current;
-    if (!container) return;
-
-    timelineItems.forEach(item => {
-      if (item.mediaFile.type === 'video' && item.mediaFile.url) {
-        if (!videoElementsRef.current.has(item.id)) {
-          const video = document.createElement('video');
-          video.src = item.mediaFile.url;
-          video.crossOrigin = 'anonymous';
-          video.muted = false; // Audio abilitato di default
-          video.volume = volume / 100;
-          video.style.display = 'none';
-          video.preload = 'metadata';
-
-          // Aggiungi al DOM nascosto per permettere riproduzione audio
-          container.appendChild(video);
-          videoElementsRef.current.set(item.id, video);
-
-          video.addEventListener('loadedmetadata', () => {
-            console.log(`Video loaded: ${item.mediaFile.name}, duration: ${video.duration}`);
-          });
-
-          // FIXED: Previeni il seek automatico del video browser
-          video.addEventListener('timeupdate', (e) => {
-            e.stopPropagation();
-          });
-        }
-      } else if (item.mediaFile.type === 'audio' && item.mediaFile.url) {
-        if (!audioElementsRef.current.has(item.id)) {
-          const audio = document.createElement('audio');
-          audio.src = item.mediaFile.url;
-          audio.crossOrigin = 'anonymous';
-          audio.muted = false; // Audio abilitato di default
-          audio.volume = volume / 100;
-          audio.preload = 'metadata';
-
-          // Aggiungi al DOM nascosto
-          container.appendChild(audio);
-          audioElementsRef.current.set(item.id, audio);
-
-          audio.addEventListener('loadedmetadata', () => {
-            console.log(`Audio loaded: ${item.mediaFile.name}, duration: ${audio.duration}`);
-          });
-
-          // FIXED: Previeni il seek automatico dell'audio browser
-          audio.addEventListener('timeupdate', (e) => {
-            e.stopPropagation();
-          });
-        }
-      } else if (item.mediaFile.type === 'image' && item.mediaFile.url) {
-        if (!imageElementsRef.current.has(item.id)) {
-          const img = new Image();
-          img.crossOrigin = 'anonymous';
-          img.src = item.mediaFile.url;
-          imageElementsRef.current.set(item.id, img);
-        }
-      }
-    });
-  }, [timelineItems, volume]);
-
-  // Gestisci il play/pause e la sincronizzazione dei media
-  useEffect(() => {
-    const activeItems = getActiveItems();
-
-    // Gestisci i video
-    videoElementsRef.current.forEach((video, itemId) => {
-      const item = activeItems.find(item => item.id === itemId);
-      if (item) {
-        const relativeTime = currentTime - item.startTime;
-        const mediaOffset = item.mediaStartOffset || 0;
-        const actualVideoTime = relativeTime + mediaOffset;
-
-        // FIXED: Sincronizza sempre il tempo, ma con tolleranza ridotta per evitare loop
-        if (Math.abs(video.currentTime - actualVideoTime) > 0.2) {
-          video.currentTime = actualVideoTime;
-        }
-
-        if (isPlaying && actualVideoTime >= 0 && actualVideoTime <= video.duration) {
-          video.muted = false;
-          video.volume = volume / 100;
-          video.play().catch(e => {
-            console.warn('Video play failed:', e);
-            // Fallback: prova a riprodurre muted
-            video.muted = true;
-            video.play().catch(err => console.warn('Muted video play failed:', err));
-          });
-        } else {
-          video.pause();
-        }
-      } else {
-        video.pause();
-      }
-    });
-
-    // Gestisci gli audio
-    audioElementsRef.current.forEach((audio, itemId) => {
-      const item = activeItems.find(item => item.id === itemId);
-      if (item) {
-        const relativeTime = currentTime - item.startTime;
-        const mediaOffset = item.mediaStartOffset || 0;
-        const actualAudioTime = relativeTime + mediaOffset;
-
-        // FIXED: Sincronizza sempre il tempo, ma con tolleranza ridotta per evitare loop
-        if (Math.abs(audio.currentTime - actualAudioTime) > 0.2) {
-          audio.currentTime = actualAudioTime;
-        }
-
-        if (isPlaying && actualAudioTime >= 0 && actualAudioTime <= audio.duration) {
-          audio.muted = false;
-          audio.volume = volume / 100;
-          audio.play().catch(e => {
-            console.warn('Audio play failed:', e);
-          });
-        } else {
-          audio.pause();
-        }
-      } else {
-        audio.pause();
-      }
-    });
-  }, [isPlaying, getActiveItems, currentTime, volume]);
-
-  // Rendering composito su canvas
+  // OTTIMIZZAZIONE: Throttled render function
   const renderComposite = useCallback(() => {
+    const now = performance.now();
+    
+    // Throttle rendering a max 60fps
+    if (now - lastRenderTimeRef.current < 16.67) {
+      return;
+    }
+    
+    lastRenderTimeRef.current = now;
+    
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const activeItems = getActiveItems();
-
-    // Pulisci canvas
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // Clear canvas solo se necessario
+    if (needsRenderRef.current) {
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      needsRenderRef.current = false;
+    }
 
     if (activeItems.length === 0) {
-      // Mostra messaggio con icona ciak quando non ci sono elementi attivi
       ctx.fillStyle = '#666666';
       ctx.font = '64px Arial';
       ctx.textAlign = 'center';
       ctx.fillText('🎬', canvas.width / 2, canvas.height / 2 - 40);
       ctx.font = '24px Arial';
       ctx.fillText('No active media at current time', canvas.width / 2, canvas.height / 2 + 20);
-      ctx.font = '16px Arial';
-      ctx.fillText('Add media to timeline and play to see preview', canvas.width / 2, canvas.height / 2 + 50);
       return;
     }
 
-    // Renderizza ogni elemento attivo (dal track più basso al più alto)
+    // OTTIMIZZAZIONE: Batch rendering degli elementi attivi
     activeItems.forEach(item => {
       const relativeTime = currentTime - item.startTime;
-
+      
       try {
         if (item.mediaFile.type === 'video') {
           const video = videoElementsRef.current.get(item.id);
-          if (video && video.readyState >= 2) { // HAVE_CURRENT_DATA
-            // Calcola dimensioni mantenendo aspect ratio
+          if (video && video.readyState >= 2) {
+            // OTTIMIZZAZIONE: Cache delle dimensioni di rendering
             const videoAspect = video.videoWidth / video.videoHeight;
             const canvasAspect = canvas.width / canvas.height;
 
             let renderWidth, renderHeight, offsetX, offsetY;
-
             if (videoAspect > canvasAspect) {
-              // Video più largo del canvas
               renderWidth = canvas.width;
               renderHeight = canvas.width / videoAspect;
               offsetX = 0;
               offsetY = (canvas.height - renderHeight) / 2;
             } else {
-              // Video più alto del canvas
               renderWidth = canvas.height * videoAspect;
               renderHeight = canvas.height;
               offsetX = (canvas.width - renderWidth) / 2;
               offsetY = 0;
             }
 
-            // Applica offset basato su track per layering
             const trackOffsetX = item.track * 20;
             const trackOffsetY = item.track * 20;
 
@@ -295,7 +128,7 @@ export const CompositeVideoPlayer = ({
               renderHeight - trackOffsetY * 2
             );
 
-            // Overlay con nome del file e info audio
+            // Overlay ottimizzato
             ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
             ctx.fillRect(offsetX + trackOffsetX, offsetY + trackOffsetY, 250, 30);
             ctx.fillStyle = '#ffffff';
@@ -309,36 +142,17 @@ export const CompositeVideoPlayer = ({
               offsetX + trackOffsetX + 10,
               offsetY + trackOffsetY + 20
             );
-          } else {
-            // Placeholder per video non ancora caricato
-            const trackColor = `hsl(${item.track * 120}, 60%, 40%)`;
-            ctx.fillStyle = trackColor;
-            ctx.fillRect(
-              item.track * 30,
-              item.track * 30,
-              canvas.width - item.track * 60,
-              canvas.height - item.track * 60
-            );
-            ctx.fillStyle = '#ffffff';
-            ctx.font = '16px Arial';
-            ctx.textAlign = 'left';
-            ctx.fillText(
-              `Loading: ${item.mediaFile.name}`,
-              item.track * 30 + 20,
-              item.track * 30 + 40
-            );
           }
         } else if (item.mediaFile.type === 'image') {
           const img = imageElementsRef.current.get(item.id);
           if (img && img.complete) {
-            // Calcola dimensioni per immagine
+            // Similar optimization for images...
             const imgAspect = img.width / img.height;
             const canvasAspect = canvas.width / canvas.height;
 
             let renderWidth, renderHeight, offsetX, offsetY;
-
             if (imgAspect > canvasAspect) {
-              renderWidth = canvas.width * 0.8; // Leggermente più piccola per le immagini
+              renderWidth = canvas.width * 0.8;
               renderHeight = renderWidth / imgAspect;
               offsetX = (canvas.width - renderWidth) / 2;
               offsetY = (canvas.height - renderHeight) / 2;
@@ -349,7 +163,6 @@ export const CompositeVideoPlayer = ({
               offsetY = (canvas.height - renderHeight) / 2;
             }
 
-            // Offset per track
             const trackOffsetX = item.track * 40;
             const trackOffsetY = item.track * 40;
 
@@ -360,78 +173,156 @@ export const CompositeVideoPlayer = ({
               renderWidth - trackOffsetX,
               renderHeight - trackOffsetY
             );
-
-            // Overlay
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-            ctx.fillRect(offsetX + trackOffsetX, offsetY + trackOffsetY, 180, 25);
-            ctx.fillStyle = '#ffffff';
-            ctx.font = '12px Arial';
-            ctx.fillText(
-              item.mediaFile.name,
-              offsetX + trackOffsetX + 10,
-              offsetY + trackOffsetY + 18
-            );
-          } else {
-            // Placeholder per immagine non caricata
-            const trackColor = `hsl(${item.track * 120 + 60}, 70%, 60%)`;
-            ctx.fillStyle = trackColor;
-            ctx.fillRect(
-              item.track * 40,
-              item.track * 40,
-              300,
-              200
-            );
-            ctx.fillStyle = '#000000';
-            ctx.font = '14px Arial';
-            ctx.fillText(
-              `Loading: ${item.mediaFile.name}`,
-              item.track * 40 + 20,
-              item.track * 40 + 30
-            );
           }
-        } else if (item.mediaFile.type === 'audio') {
-          // Visualizzazione per file audio - con indicatori di riproduzione
-          const audio = audioElementsRef.current.get(item.id);
-          const isAudioPlaying = audio && !audio.paused;
-          const trackColor = isAudioPlaying ? `hsl(${item.track * 120 + 180}, 90%, 60%)` : `hsl(${item.track * 120 + 180}, 70%, 50%)`;
-
-          ctx.fillStyle = trackColor;
-          ctx.fillRect(
-            20,
-            canvas.height - 60 - item.track * 25,
-            200,
-            20
-          );
-          ctx.fillStyle = '#ffffff';
-          ctx.font = '12px Arial';
-          const audioIcon = (audio && audio.muted) ? '🔇' : (isAudioPlaying ? '🎵' : '♪');
-          const mediaOffset = item.mediaStartOffset || 0;
-          const displayTime = relativeTime + mediaOffset;
-          ctx.fillText(
-            `${audioIcon} ${item.mediaFile.name} (${displayTime.toFixed(1)}s)`,
-            30,
-            canvas.height - 48 - item.track * 25
-          );
         }
       } catch (error) {
         console.warn(`Error rendering item ${item.id}:`, error);
       }
     });
-  }, [currentTime, timelineItems, getActiveItems]);
+  }, [activeItems, currentTime, canvasDimensions]);
 
-  // FIXED: Animation loop migliorato per il playback - usa sempre lastTimeRef come riferimento
+  // OTTIMIZZAZIONE: Miglior gestione elementi media
+  useEffect(() => {
+    const container = hiddenVideoContainerRef.current;
+    if (!container) return;
+
+    // Cleanup elementi non più necessari
+    const currentItemIds = new Set(timelineItems.map(item => item.id));
+    
+    videoElementsRef.current.forEach((video, itemId) => {
+      if (!currentItemIds.has(itemId)) {
+        video.pause();
+        video.remove();
+        videoElementsRef.current.delete(itemId);
+      }
+    });
+
+    audioElementsRef.current.forEach((audio, itemId) => {
+      if (!currentItemIds.has(itemId)) {
+        audio.pause();
+        audio.remove();
+        audioElementsRef.current.delete(itemId);
+      }
+    });
+
+    imageElementsRef.current.forEach((img, itemId) => {
+      if (!currentItemIds.has(itemId)) {
+        imageElementsRef.current.delete(itemId);
+      }
+    });
+
+    // Crea solo elementi nuovi
+    timelineItems.forEach(item => {
+      if (item.mediaFile.type === 'video' && !videoElementsRef.current.has(item.id)) {
+        const video = document.createElement('video');
+        video.src = item.mediaFile.url;
+        video.crossOrigin = 'anonymous';
+        video.muted = false;
+        video.volume = volume / 100;
+        video.style.display = 'none';
+        video.preload = 'metadata';
+        
+        // OTTIMIZZAZIONE: Previeni eventi automatici
+        video.addEventListener('timeupdate', (e) => e.stopPropagation());
+        
+        container.appendChild(video);
+        videoElementsRef.current.set(item.id, video);
+      } else if (item.mediaFile.type === 'audio' && !audioElementsRef.current.has(item.id)) {
+        const audio = document.createElement('audio');
+        audio.src = item.mediaFile.url;
+        audio.crossOrigin = 'anonymous';
+        audio.muted = false;
+        audio.volume = volume / 100;
+        audio.preload = 'metadata';
+        
+        audio.addEventListener('timeupdate', (e) => e.stopPropagation());
+        
+        container.appendChild(audio);
+        audioElementsRef.current.set(item.id, audio);
+      } else if (item.mediaFile.type === 'image' && !imageElementsRef.current.has(item.id)) {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.src = item.mediaFile.url;
+        imageElementsRef.current.set(item.id, img);
+      }
+    });
+  }, [timelineItems, volume]);
+
+  // OTTIMIZZAZIONE: Sincronizzazione media migliorata
+  useEffect(() => {
+    const syncTolerance = 0.1; // Ridotta la tolleranza per miglior precisione
+    
+    // Gestisci video
+    videoElementsRef.current.forEach((video, itemId) => {
+      const item = activeItems.find(item => item.id === itemId);
+      if (item) {
+        const relativeTime = currentTime - item.startTime;
+        const mediaOffset = item.mediaStartOffset || 0;
+        const targetTime = relativeTime + mediaOffset;
+
+        // OTTIMIZZAZIONE: Sync solo quando necessario
+        if (Math.abs(video.currentTime - targetTime) > syncTolerance) {
+          video.currentTime = targetTime;
+        }
+
+        if (isPlaying && targetTime >= 0 && targetTime <= video.duration) {
+          video.volume = volume / 100;
+          if (video.paused) {
+            video.play().catch(e => console.warn('Video play failed:', e));
+          }
+        } else if (!video.paused) {
+          video.pause();
+        }
+      } else if (!video.paused) {
+        video.pause();
+      }
+    });
+
+    // Gestisci audio
+    audioElementsRef.current.forEach((audio, itemId) => {
+      const item = activeItems.find(item => item.id === itemId);
+      if (item) {
+        const relativeTime = currentTime - item.startTime;
+        const mediaOffset = item.mediaStartOffset || 0;
+        const targetTime = relativeTime + mediaOffset;
+
+        if (Math.abs(audio.currentTime - targetTime) > syncTolerance) {
+          audio.currentTime = targetTime;
+        }
+
+        if (isPlaying && targetTime >= 0 && targetTime <= audio.duration) {
+          audio.volume = volume / 100;
+          if (audio.paused) {
+            audio.play().catch(e => console.warn('Audio play failed:', e));
+          }
+        } else if (!audio.paused) {
+          audio.pause();
+        }
+      } else if (!audio.paused) {
+        audio.pause();
+      }
+    });
+
+    // Marca per re-render
+    needsRenderRef.current = true;
+  }, [isPlaying, activeItems, currentTime, volume]);
+
+  // OTTIMIZZAZIONE: Animation loop migliorato con timing reale
   useEffect(() => {
     if (isPlaying) {
+      lastUpdateTimeRef.current = performance.now();
+      
       const animate = () => {
-        const deltaTime = 0.033; // ~30fps
-        const newTime = lastTimeRef.current + deltaTime;
-        lastTimeRef.current = newTime;
+        const now = performance.now();
+        const deltaTime = (now - lastUpdateTimeRef.current) / 1000; // Convert to seconds
+        lastUpdateTimeRef.current = now;
+        
+        const newTime = currentTime + deltaTime;
         onTimeUpdate(newTime);
+        
         animationFrameRef.current = requestAnimationFrame(animate);
       };
 
-      // FIXED: Assicurati che lastTimeRef sia sincronizzato prima di iniziare l'animazione
-      lastTimeRef.current = currentTime;
       animationFrameRef.current = requestAnimationFrame(animate);
     } else {
       if (animationFrameRef.current) {
@@ -445,43 +336,43 @@ export const CompositeVideoPlayer = ({
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [isPlaying, onTimeUpdate]);
+  }, [isPlaying, currentTime, onTimeUpdate]);
 
-  // Re-render quando cambiano tempo o elementi timeline
+  // OTTIMIZZAZIONE: Rendering condizionale
   useEffect(() => {
-    renderComposite();
+    if (needsRenderRef.current) {
+      renderComposite();
+    }
   }, [renderComposite]);
 
+  // Resta del codice per i controlli...
   const handlePlayPause = () => {
-    // FIXED: Quando si preme play, assicurati che lastTimeRef sia sincronizzato con currentTime
-    if (!isPlaying) {
-      lastTimeRef.current = currentTime;
-    }
-
     onPlayStateChange(!isPlaying);
   };
 
   const handleSeekBackward = () => {
     const newTime = Math.max(0, currentTime - 5);
     onTimeUpdate(newTime);
-    // lastTimeRef verrà aggiornato dal useEffect che monitora currentTime
+    needsRenderRef.current = true;
   };
 
   const handleSeekForward = () => {
     const newTime = currentTime + 5;
     onTimeUpdate(newTime);
-    // lastTimeRef verrà aggiornato dal useEffect che monitora currentTime
+    needsRenderRef.current = true;
   };
 
   const handleVolumeChange = (value: number[]) => {
     const newVolume = value[0];
     setVolume(newVolume);
-    // Applica volume a tutti i video e audio attivi
+    
+    // OTTIMIZZAZIONE: Batch update del volume
+    const volumeDecimal = newVolume / 100;
     videoElementsRef.current.forEach(video => {
-      video.volume = newVolume / 100;
+      video.volume = volumeDecimal;
     });
     audioElementsRef.current.forEach(audio => {
-      audio.volume = newVolume / 100;
+      audio.volume = volumeDecimal;
     });
   };
 
@@ -493,10 +384,8 @@ export const CompositeVideoPlayer = ({
 
   return (
     <div className="h-full flex flex-col">
-      {/* Hidden container per video/audio elements */}
       <div ref={hiddenVideoContainerRef} style={{ display: 'none' }} />
 
-      {/* Video Display Area - Canvas per composizione */}
       <div className="flex-1 flex items-center justify-center bg-black relative p-2 min-h-0">
         <canvas
           ref={canvasRef}
@@ -505,16 +394,14 @@ export const CompositeVideoPlayer = ({
           className="w-full h-full object-contain border border-muted-foreground/20 bg-black"
           style={{
             aspectRatio: aspectRatio.replace(':', '/'),
-            maxHeight: 'calc(100% - 20px)', // Lascia spazio per il padding
+            maxHeight: 'calc(100% - 20px)',
             maxWidth: 'calc(100% - 20px)'
           }}
         />
       </div>
 
-      {/* Controls - Always visible */}
       <Card className="m-2 p-3 bg-card/95 backdrop-blur-sm shrink-0">
         <div className="flex items-center justify-between">
-          {/* Playback Controls */}
           <div className="flex items-center space-x-2">
             <Button
               variant="ghost"
@@ -550,7 +437,6 @@ export const CompositeVideoPlayer = ({
             </Button>
           </div>
 
-          {/* Time Display */}
           <div className="text-sm text-muted-foreground font-mono">
             {formatTime(currentTime)}
             {timelineItems.length === 0 && (
@@ -560,7 +446,6 @@ export const CompositeVideoPlayer = ({
             )}
           </div>
 
-          {/* Volume Control */}
           <div className="flex items-center space-x-2 w-24">
             <Volume2 className="w-4 h-4 text-muted-foreground" />
             <Slider
