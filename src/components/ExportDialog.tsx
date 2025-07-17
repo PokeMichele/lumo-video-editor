@@ -1,5 +1,5 @@
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
@@ -24,79 +24,242 @@ export const ExportDialog = ({
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState<'preparing' | 'rendering' | 'completed' | 'error'>('preparing');
   const [exportedVideoUrl, setExportedVideoUrl] = useState<string | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
 
-  // Simulate export process
+  // Calculate canvas dimensions based on aspect ratio
+  const getCanvasDimensions = () => {
+    const baseWidth = 1280;
+    switch (aspectRatio) {
+      case '16:9':
+        return { width: baseWidth, height: Math.round(baseWidth / (16/9)) };
+      case '4:3':
+        return { width: baseWidth, height: Math.round(baseWidth / (4/3)) };
+      case '9:16':
+        return { width: Math.round(baseWidth * (9/16)), height: baseWidth };
+      default:
+        return { width: baseWidth, height: Math.round(baseWidth / (16/9)) };
+    }
+  };
+
+  // Render frame at specific time
+  const renderFrame = async (time: number, ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement) => {
+    // Clear canvas
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Get active items at this time
+    const activeItems = timelineItems.filter(item =>
+      time >= item.startTime && time < item.startTime + item.duration
+    ).sort((a, b) => a.track - b.track);
+
+    // Render each active item
+    for (const item of activeItems) {
+      const relativeTime = time - item.startTime;
+      const mediaOffset = item.mediaStartOffset || 0;
+      const actualTime = relativeTime + mediaOffset;
+
+      if (item.mediaFile.type === 'video') {
+        const video = document.createElement('video');
+        video.src = item.mediaFile.url;
+        video.currentTime = actualTime;
+        video.muted = true;
+        
+        await new Promise<void>((resolve) => {
+          video.addEventListener('loadeddata', () => {
+            if (video.readyState >= 2) {
+              try {
+                // Calculate dimensions maintaining aspect ratio
+                const videoAspect = video.videoWidth / video.videoHeight;
+                const canvasAspect = canvas.width / canvas.height;
+
+                let renderWidth, renderHeight, offsetX, offsetY;
+
+                if (videoAspect > canvasAspect) {
+                  renderWidth = canvas.width;
+                  renderHeight = canvas.width / videoAspect;
+                  offsetX = 0;
+                  offsetY = (canvas.height - renderHeight) / 2;
+                } else {
+                  renderWidth = canvas.height * videoAspect;
+                  renderHeight = canvas.height;
+                  offsetX = (canvas.width - renderWidth) / 2;
+                  offsetY = 0;
+                }
+
+                // Apply track offset
+                const trackOffsetX = item.track * 20;
+                const trackOffsetY = item.track * 20;
+
+                ctx.drawImage(
+                  video,
+                  offsetX + trackOffsetX,
+                  offsetY + trackOffsetY,
+                  renderWidth - trackOffsetX * 2,
+                  renderHeight - trackOffsetY * 2
+                );
+              } catch (error) {
+                console.warn('Error drawing video frame:', error);
+              }
+            }
+            resolve();
+          });
+          
+          video.addEventListener('error', () => resolve());
+          setTimeout(() => resolve(), 100); // Fallback timeout
+        });
+      } else if (item.mediaFile.type === 'image') {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.src = item.mediaFile.url;
+        
+        await new Promise<void>((resolve) => {
+          img.onload = () => {
+            try {
+              const imgAspect = img.width / img.height;
+              const canvasAspect = canvas.width / canvas.height;
+
+              let renderWidth, renderHeight, offsetX, offsetY;
+
+              if (imgAspect > canvasAspect) {
+                renderWidth = canvas.width * 0.8;
+                renderHeight = renderWidth / imgAspect;
+                offsetX = (canvas.width - renderWidth) / 2;
+                offsetY = (canvas.height - renderHeight) / 2;
+              } else {
+                renderHeight = canvas.height * 0.8;
+                renderWidth = renderHeight * imgAspect;
+                offsetX = (canvas.width - renderWidth) / 2;
+                offsetY = (canvas.height - renderHeight) / 2;
+              }
+
+              const trackOffsetX = item.track * 40;
+              const trackOffsetY = item.track * 40;
+
+              ctx.drawImage(
+                img,
+                offsetX + trackOffsetX,
+                offsetY + trackOffsetY,
+                renderWidth - trackOffsetX,
+                renderHeight - trackOffsetY
+              );
+            } catch (error) {
+              console.warn('Error drawing image frame:', error);
+            }
+            resolve();
+          };
+          
+          img.onerror = () => resolve();
+          setTimeout(() => resolve(), 100); // Fallback timeout
+        });
+      }
+    }
+  };
+
+  // Export process
   useEffect(() => {
     if (!isOpen) {
       setProgress(0);
       setStatus('preparing');
       setExportedVideoUrl(null);
+      recordedChunksRef.current = [];
       return;
     }
 
-    const simulateExport = async () => {
-      setStatus('preparing');
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      setStatus('rendering');
-      
-      // Simulate rendering progress
-      for (let i = 0; i <= 100; i += 2) {
-        setProgress(i);
-        await new Promise(resolve => setTimeout(resolve, 50));
-      }
-      
-      // Create a simple video blob (in a real implementation, this would be the actual video)
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      
-      // Set canvas size based on aspect ratio
-      const aspectRatios = {
-        '16:9': { width: 1920, height: 1080 },
-        '4:3': { width: 1440, height: 1080 },
-        '9:16': { width: 1080, height: 1920 }
-      };
-      
-      const dimensions = aspectRatios[aspectRatio];
-      canvas.width = dimensions.width;
-      canvas.height = dimensions.height;
-      
-      if (ctx) {
-        // Create a simple demo video frame
-        ctx.fillStyle = '#000000';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const exportVideo = async () => {
+      try {
+        setStatus('preparing');
+        await new Promise(resolve => setTimeout(resolve, 500));
         
-        ctx.fillStyle = '#ffffff';
-        ctx.font = '48px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText('Exported Video', canvas.width / 2, canvas.height / 2);
-        ctx.fillText(`${aspectRatio}`, canvas.width / 2, canvas.height / 2 + 60);
+        const canvas = canvasRef.current;
+        if (!canvas) throw new Error('Canvas not available');
         
-        // Convert canvas to blob
-        canvas.toBlob((blob) => {
-          if (blob) {
-            const url = URL.createObjectURL(blob);
-            setExportedVideoUrl(url);
-            setStatus('completed');
-            
-            // Auto-download
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = `exported-video-${aspectRatio}-${Date.now()}.webp`;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('Canvas context not available');
+        
+        const dimensions = getCanvasDimensions();
+        canvas.width = dimensions.width;
+        canvas.height = dimensions.height;
+        
+        setStatus('rendering');
+        
+        // Set up MediaRecorder
+        const stream = canvas.captureStream(30); // 30 FPS
+        const mediaRecorder = new MediaRecorder(stream, {
+          mimeType: 'video/webm;codecs=vp9'
+        });
+        
+        mediaRecorderRef.current = mediaRecorder;
+        recordedChunksRef.current = [];
+        
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            recordedChunksRef.current.push(event.data);
           }
-        }, 'image/webp');
+        };
+        
+        mediaRecorder.onstop = () => {
+          const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
+          const url = URL.createObjectURL(blob);
+          setExportedVideoUrl(url);
+          setStatus('completed');
+          
+          // Auto-download
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `exported-video-${aspectRatio}-${Date.now()}.webm`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        };
+        
+        mediaRecorder.start();
+        
+        // Calculate actual export duration (only render sections with content)
+        const maxEndTime = timelineItems.reduce((max, item) => {
+          return Math.max(max, item.startTime + item.duration);
+        }, 0);
+        
+        const exportDuration = Math.max(maxEndTime, 1); // At least 1 second
+        const fps = 30;
+        const totalFrames = Math.ceil(exportDuration * fps);
+        const frameInterval = 1000 / fps; // milliseconds per frame
+        
+        let currentFrame = 0;
+        
+        const renderNextFrame = async () => {
+          if (currentFrame >= totalFrames) {
+            mediaRecorder.stop();
+            return;
+          }
+          
+          const currentTime = currentFrame / fps;
+          await renderFrame(currentTime, ctx, canvas);
+          
+          currentFrame++;
+          const progressPercent = (currentFrame / totalFrames) * 100;
+          setProgress(progressPercent);
+          
+          // Use setTimeout to control frame rate
+          setTimeout(renderNextFrame, frameInterval);
+        };
+        
+        renderNextFrame();
+        
+      } catch (error) {
+        console.error('Export failed:', error);
+        setStatus('error');
       }
     };
 
-    simulateExport().catch(() => {
-      setStatus('error');
-    });
-  }, [isOpen, aspectRatio]);
+    exportVideo();
+  }, [isOpen, timelineItems, aspectRatio]);
 
   const handleClose = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.stop();
+    }
     if (exportedVideoUrl) {
       URL.revokeObjectURL(exportedVideoUrl);
     }
@@ -124,81 +287,89 @@ export const ExportDialog = ({
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Download className="w-5 h-5" />
-            Export Video
-          </DialogTitle>
-        </DialogHeader>
-        
-        <div className="space-y-6">
-          {/* Export Details */}
-          <div className="space-y-2">
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Aspect Ratio:</span>
-              <span className="font-medium">{aspectRatio}</span>
+    <>
+      {/* Hidden canvas for rendering */}
+      <canvas
+        ref={canvasRef}
+        style={{ display: 'none' }}
+      />
+      
+      <Dialog open={isOpen} onOpenChange={handleClose}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Download className="w-5 h-5" />
+              Export Video
+            </DialogTitle>
+          </DialogHeader>
+          
+          <div className="space-y-6">
+            {/* Export Details */}
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Aspect Ratio:</span>
+                <span className="font-medium">{aspectRatio}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Duration:</span>
+                <span className="font-medium">{Math.round(totalDuration)}s</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Timeline Items:</span>
+                <span className="font-medium">{timelineItems.length}</span>
+              </div>
             </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Duration:</span>
-              <span className="font-medium">{Math.round(totalDuration)}s</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Timeline Items:</span>
-              <span className="font-medium">{timelineItems.length}</span>
-            </div>
-          </div>
 
-          {/* Progress Section */}
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <span className={`text-sm font-medium ${getStatusColor()}`}>
-                {getStatusText()}
-              </span>
-              {status === 'completed' && (
-                <CheckCircle className="w-5 h-5 text-green-500" />
+            {/* Progress Section */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <span className={`text-sm font-medium ${getStatusColor()}`}>
+                  {getStatusText()}
+                </span>
+                {status === 'completed' && (
+                  <CheckCircle className="w-5 h-5 text-green-500" />
+                )}
+              </div>
+              
+              <Progress value={progress} className="w-full" />
+              
+              <div className="text-xs text-muted-foreground text-center">
+                {progress.toFixed(1)}% completed
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex justify-end gap-2">
+              {status === 'completed' && exportedVideoUrl && (
+                <Button
+                  onClick={() => {
+                    const link = document.createElement('a');
+                    link.href = exportedVideoUrl;
+                    link.download = `exported-video-${aspectRatio}-${Date.now()}.webm`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                  }}
+                  variant="outline"
+                  size="sm"
+                >
+                  <Download className="w-4 h-4 mr-2" />
+                  Download Again
+                </Button>
               )}
-            </div>
-            
-            <Progress value={progress} className="w-full" />
-            
-            <div className="text-xs text-muted-foreground text-center">
-              {progress}% completed
-            </div>
-          </div>
-
-          {/* Action Buttons */}
-          <div className="flex justify-end gap-2">
-            {status === 'completed' && exportedVideoUrl && (
+              
               <Button
-                onClick={() => {
-                  const link = document.createElement('a');
-                  link.href = exportedVideoUrl;
-                  link.download = `exported-video-${aspectRatio}-${Date.now()}.webp`;
-                  document.body.appendChild(link);
-                  link.click();
-                  document.body.removeChild(link);
-                }}
-                variant="outline"
+                onClick={handleClose}
+                variant={status === 'completed' ? 'default' : 'outline'}
                 size="sm"
+                disabled={status === 'preparing' || status === 'rendering'}
               >
-                <Download className="w-4 h-4 mr-2" />
-                Download Again
+                {status === 'completed' ? 'Done' : 'Cancel'}
               </Button>
-            )}
-            
-            <Button
-              onClick={handleClose}
-              variant={status === 'completed' ? 'default' : 'outline'}
-              size="sm"
-              disabled={status === 'preparing' || status === 'rendering'}
-            >
-              {status === 'completed' ? 'Done' : 'Cancel'}
-            </Button>
+            </div>
           </div>
-        </div>
-      </DialogContent>
-    </Dialog>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 };
