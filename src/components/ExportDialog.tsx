@@ -103,6 +103,16 @@ export const ExportDialog = ({
     return Math.max(0, Math.min(1, globalAlpha));
   }, [timelineItems]);
 
+  // NUOVO: Funzione per verificare se è attivo l'effetto black & white (per export)
+  const isBlackWhiteActive = useCallback((time: number) => {
+    return timelineItems.some(item =>
+      item.mediaFile.type === 'effect' &&
+      item.mediaFile.effectType === 'black-white' &&
+      time >= item.startTime &&
+      time < item.startTime + item.duration
+    );
+  }, [timelineItems]);
+
   // OTTIMIZZAZIONE: Preload intelligente dei media
   const preloadMedia = useCallback(async () => {
     if (cancelledRef.current) return;
@@ -301,7 +311,7 @@ export const ExportDialog = ({
     }
   }, [timelineItems]);
 
-  // AGGIORNATO: Render frame migliorato con supporto effetti
+  // AGGIORNATO: Render frame migliorato con supporto completo per tutti gli effetti
   const renderFrame = useCallback(async (time: number, ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement) => {
     if (cancelledRef.current) return;
 
@@ -321,12 +331,20 @@ export const ExportDialog = ({
 
     if (activeItems.length === 0) return;
 
-    // NUOVO: Calcola l'alfa globale basato sugli effetti attivi
+    // NUOVO: Calcola l'alfa globale e verifica Black & White
     const globalAlpha = calculateGlobalAlpha(time);
+    const blackWhiteActive = isBlackWhiteActive(time);
     
-    // Applica l'alfa globale prima di renderizzare i media
+    // AGGIORNATO: Applica gli effetti prima di renderizzare i media
     ctx.save();
     ctx.globalAlpha = globalAlpha;
+    
+    // NUOVO: Applica il filtro black & white se attivo
+    if (blackWhiteActive) {
+      ctx.filter = 'grayscale(1)';
+    } else {
+      ctx.filter = 'none';
+    }
 
     // OTTIMIZZAZIONE: Batch rendering per tipo di media
     const videoItems = activeItems.filter(item => item.mediaFile.type === 'video');
@@ -437,7 +455,7 @@ export const ExportDialog = ({
     if (frameTime > 33) { // Se impiega più di 33ms (30fps)
       perf.droppedFrames++;
     }
-  }, [timelineItems, calculateGlobalAlpha]);
+  }, [timelineItems, calculateGlobalAlpha, isBlackWhiteActive]);
 
   // OTTIMIZZAZIONE: Sync audio migliorato
   const syncAudio = useCallback((time: number, audioNodes: any[]) => {
