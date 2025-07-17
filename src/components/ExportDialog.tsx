@@ -676,12 +676,13 @@ export const ExportDialog = ({
           return;
         }
 
-        // Se abbiamo finito tutti i frames, ferma il MediaRecorder
+        // Se abbiamo finito tutti i frames, ferma il MediaRecorder e STOP definitivo
         if (currentFrame >= totalFrames) {
           if (mediaRecorder.state === 'recording') {
             mediaRecorder.stop();
           }
-          return;
+          renderingRef.current = false; // IMPORTANTE: Segna rendering come finito
+          return; // STOP DEFINITIVO - non programmare più frame
         }
 
         const currentTime = currentFrame / targetFPS;
@@ -711,8 +712,10 @@ export const ExportDialog = ({
         const targetFrameTime = frameInterval;
         const delay = Math.max(0, targetFrameTime - frameTime);
 
-        // Programma il prossimo frame
-        timeoutRef.current = setTimeout(renderLoop, delay);
+        // Programma il prossimo frame SOLO se non abbiamo finito
+        if (currentFrame < totalFrames && !cancelledRef.current) {
+          timeoutRef.current = setTimeout(renderLoop, delay);
+        }
       };
 
       renderLoop();
