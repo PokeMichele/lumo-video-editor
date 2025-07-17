@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { FilesBrowser } from "./FilesBrowser";
 import { CompositeVideoPlayer } from "./CompositeVideoPlayer";
 import { Timeline, Track } from "./Timeline";
+import { ExportDialog } from "./ExportDialog";
 import { Button } from "@/components/ui/button";
 import { Download } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -37,6 +38,7 @@ export const VideoEditor = () => {
   const [history, setHistory] = useState<HistoryState[]>([{ timelineItems: [], currentTime: 0 }]);
   const [historyIndex, setHistoryIndex] = useState(0);
   const [aspectRatio, setAspectRatio] = useState<'16:9' | '4:3' | '9:16'>('16:9');
+  const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
   
   // Gestione tracce dinamiche
   const [tracks, setTracks] = useState<Track[]>([
@@ -148,19 +150,16 @@ export const VideoEditor = () => {
   };
 
   const handleExport = () => {
-    toast({
-      title: "Export Started",
-      description: "Your video is being rendered. This may take a few minutes.",
-    });
-
-    // Here you would implement the actual export functionality
-    // For now, we'll just show a success message after a delay
-    setTimeout(() => {
+    if (timelineItems.length === 0) {
       toast({
-        title: "Export Complete",
-        description: "Your video has been successfully exported!",
+        title: "No Content to Export",
+        description: "Please add some media to the timeline before exporting.",
+        variant: "destructive",
       });
-    }, 3000);
+      return;
+    }
+
+    setIsExportDialogOpen(true);
   };
 
   return (
@@ -187,7 +186,7 @@ export const VideoEditor = () => {
         {/* Right Panel - Diviso in due sezioni */}
         <div className="flex-1 flex flex-col">
           {/* Video Player - AREA PRINCIPALE CON DIMENSIONI FISSE */}
-          <div className="relative bg-card border-b border-border" style={{ height: 'calc(100vh - 400px)' }}>
+          <div className="relative bg-card border-b border-border" style={{ height: 'calc(100vh - 384px)' }}>
             <div className="absolute top-4 right-4 z-10 flex items-center gap-3">
               {/* Aspect Ratio Buttons */}
               <div className="flex items-center gap-1 bg-background/80 backdrop-blur-sm border border-border rounded-lg p-1">
@@ -251,6 +250,15 @@ export const VideoEditor = () => {
           onTracksChange={handleTracksChange}
         />
       </div>
+
+      {/* Export Dialog */}
+      <ExportDialog
+        isOpen={isExportDialogOpen}
+        onClose={() => setIsExportDialogOpen(false)}
+        timelineItems={timelineItems}
+        totalDuration={totalDuration}
+        aspectRatio={aspectRatio}
+      />
     </div>
   );
 };
