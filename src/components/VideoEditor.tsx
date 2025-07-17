@@ -229,9 +229,9 @@ export const VideoEditor = () => {
           <div className="h-16 bg-muted/10 flex items-center justify-center px-6 border-b border-border">
             <div className="flex items-center space-x-3">
               <span className="text-sm font-medium text-muted-foreground">Quick Tools:</span>
-              <Button variant="outline" size="sm">Effetti</Button>
-              <Button variant="outline" size="sm">Colori</Button>
-              <Button variant="outline" size="sm">Audio</Button>
+              <Button variant="outline" size="sm">Effects</Button>
+              <Button variant="outline" size="sm">Colors</Button>
+              <Button variant="outline" size="sm">Audio Mixer</Button>
             </div>
           </div>
         </div>
