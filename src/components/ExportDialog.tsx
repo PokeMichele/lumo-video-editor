@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
@@ -25,6 +24,7 @@ export const ExportDialog = ({
   const [status, setStatus] = useState<'preparing' | 'rendering' | 'completed' | 'error'>('preparing');
   const [exportedVideoUrl, setExportedVideoUrl] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
 
@@ -41,6 +41,63 @@ export const ExportDialog = ({
       default:
         return { width: baseWidth, height: Math.round(baseWidth / (16/9)) };
     }
+  };
+
+  // Create audio elements for timeline items
+  const createAudioElements = async () => {
+    const audioElements: Map<string, HTMLAudioElement | HTMLVideoElement> = new Map();
+    
+    for (const item of timelineItems) {
+      if (item.mediaFile.type === 'video' || item.mediaFile.type === 'audio') {
+        const element = item.mediaFile.type === 'video' 
+          ? document.createElement('video') 
+          : document.createElement('audio');
+        
+        element.src = item.mediaFile.url;
+        element.crossOrigin = 'anonymous';
+        element.muted = false;
+        element.volume = 1.0;
+        element.preload = 'metadata';
+        
+        await new Promise<void>((resolve) => {
+          element.addEventListener('loadedmetadata', () => resolve());
+          element.addEventListener('error', () => resolve());
+          setTimeout(() => resolve(), 1000); // Fallback timeout
+        });
+        
+        audioElements.set(item.id, element);
+      }
+    }
+    
+    return audioElements;
+  };
+
+  // Mix audio at specific time
+  const mixAudioAtTime = (time: number, audioElements: Map<string, HTMLAudioElement | HTMLVideoElement>, audioContext: AudioContext) => {
+    const activeItems = timelineItems.filter(item =>
+      time >= item.startTime && time < item.startTime + item.duration
+    );
+
+    // Set audio element times and play states
+    audioElements.forEach((element, itemId) => {
+      const item = activeItems.find(item => item.id === itemId);
+      if (item) {
+        const relativeTime = time - item.startTime;
+        const mediaOffset = item.mediaStartOffset || 0;
+        const actualTime = relativeTime + mediaOffset;
+
+        if (actualTime >= 0 && actualTime <= element.duration) {
+          element.currentTime = actualTime;
+          if (element.paused) {
+            element.play().catch(() => {});
+          }
+        } else {
+          element.pause();
+        }
+      } else {
+        element.pause();
+      }
+    });
   };
 
   // Render frame at specific time
@@ -182,12 +239,41 @@ export const ExportDialog = ({
         canvas.width = dimensions.width;
         canvas.height = dimensions.height;
         
+        // Create audio context for mixing
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        audioContextRef.current = audioContext;
+        
+        // Create audio elements
+        const audioElements = await createAudioElements();
+        
         setStatus('rendering');
         
-        // Set up MediaRecorder
-        const stream = canvas.captureStream(30); // 30 FPS
-        const mediaRecorder = new MediaRecorder(stream, {
-          mimeType: 'video/webm;codecs=vp9'
+        // Create audio destination for mixing
+        const audioDestination = audioContext.createMediaStreamDestination();
+        
+        // Connect audio elements to destination
+        audioElements.forEach((element) => {
+          try {
+            const source = audioContext.createMediaElementSource(element);
+            source.connect(audioDestination);
+          } catch (error) {
+            console.warn('Error connecting audio source:', error);
+          }
+        });
+        
+        // Combine canvas stream with audio
+        const canvasStream = canvas.captureStream(30); // 30 FPS
+        const audioStream = audioDestination.stream;
+        
+        // Create combined stream
+        const combinedStream = new MediaStream([
+          ...canvasStream.getVideoTracks(),
+          ...audioStream.getAudioTracks()
+        ]);
+        
+        // Set up MediaRecorder with combined stream
+        const mediaRecorder = new MediaRecorder(combinedStream, {
+          mimeType: 'video/webm;codecs=vp9,opus'
         });
         
         mediaRecorderRef.current = mediaRecorder;
@@ -205,6 +291,18 @@ export const ExportDialog = ({
           setExportedVideoUrl(url);
           setStatus('completed');
           
+          // Clean up audio elements
+          audioElements.forEach(element => {
+            element.pause();
+            element.remove();
+          });
+          
+          // Clean up audio context
+          if (audioContextRef.current) {
+            audioContextRef.current.close();
+            audioContextRef.current = null;
+          }
+          
           // Auto-download
           const link = document.createElement('a');
           link.href = url;
@@ -216,15 +314,15 @@ export const ExportDialog = ({
         
         mediaRecorder.start();
         
-        // Calculate actual export duration (only render sections with content)
+        // Calculate actual export duration
         const maxEndTime = timelineItems.reduce((max, item) => {
           return Math.max(max, item.startTime + item.duration);
         }, 0);
         
-        const exportDuration = Math.max(maxEndTime, 1); // At least 1 second
+        const exportDuration = Math.max(maxEndTime, 1);
         const fps = 30;
         const totalFrames = Math.ceil(exportDuration * fps);
-        const frameInterval = 1000 / fps; // milliseconds per frame
+        const frameInterval = 1000 / fps;
         
         let currentFrame = 0;
         
@@ -235,13 +333,17 @@ export const ExportDialog = ({
           }
           
           const currentTime = currentFrame / fps;
+          
+          // Mix audio at current time
+          mixAudioAtTime(currentTime, audioElements, audioContext);
+          
+          // Render video frame
           await renderFrame(currentTime, ctx, canvas);
           
           currentFrame++;
           const progressPercent = (currentFrame / totalFrames) * 100;
           setProgress(progressPercent);
           
-          // Use setTimeout to control frame rate
           setTimeout(renderNextFrame, frameInterval);
         };
         
@@ -260,6 +362,10 @@ export const ExportDialog = ({
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
       mediaRecorderRef.current.stop();
     }
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
     if (exportedVideoUrl) {
       URL.revokeObjectURL(exportedVideoUrl);
     }
@@ -269,7 +375,7 @@ export const ExportDialog = ({
   const getStatusText = () => {
     switch (status) {
       case 'preparing': return 'Preparing export...';
-      case 'rendering': return 'Rendering video...';
+      case 'rendering': return 'Rendering video with audio...';
       case 'completed': return 'Export completed!';
       case 'error': return 'Export failed';
       default: return 'Processing...';
