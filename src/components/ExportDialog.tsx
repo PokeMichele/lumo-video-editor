@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
-import { Download, CheckCircle, X } from "lucide-react";
+import { Download, CheckCircle, X, AlertCircle } from "lucide-react";
 import { TimelineItem } from "./VideoEditor";
 
 interface ExportDialogProps {
@@ -27,6 +27,11 @@ export const ExportDialog = ({
   const audioContextRef = useRef<AudioContext | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
+  
+  // Nuovo ref per controllare l'annullamento
+  const cancelledRef = useRef<boolean>(false);
+  const audioElementsRef = useRef<Map<string, HTMLAudioElement | HTMLVideoElement>>(new Map());
+  const timeoutRef = useRef<number | null>(null);
 
   // Calculate canvas dimensions based on aspect ratio
   const getCanvasDimensions = () => {
@@ -45,9 +50,14 @@ export const ExportDialog = ({
 
   // Create audio elements for timeline items
   const createAudioElements = async () => {
+    // Se annullato, non creare elementi audio
+    if (cancelledRef.current) return new Map();
+
     const audioElements: Map<string, HTMLAudioElement | HTMLVideoElement> = new Map();
     
     for (const item of timelineItems) {
+      if (cancelledRef.current) break; // Controlla annullamento durante il loop
+
       if (item.mediaFile.type === 'video' || item.mediaFile.type === 'audio') {
         const element = item.mediaFile.type === 'video' 
           ? document.createElement('video') 
@@ -60,26 +70,51 @@ export const ExportDialog = ({
         element.preload = 'metadata';
         
         await new Promise<void>((resolve) => {
-          element.addEventListener('loadedmetadata', () => resolve());
-          element.addEventListener('error', () => resolve());
-          setTimeout(() => resolve(), 1000); // Fallback timeout
+          const handleLoad = () => {
+            element.removeEventListener('loadedmetadata', handleLoad);
+            element.removeEventListener('error', handleError);
+            resolve();
+          };
+          
+          const handleError = () => {
+            element.removeEventListener('loadedmetadata', handleLoad);
+            element.removeEventListener('error', handleError);
+            resolve();
+          };
+          
+          element.addEventListener('loadedmetadata', handleLoad);
+          element.addEventListener('error', handleError);
+          
+          // Fallback timeout
+          setTimeout(() => {
+            element.removeEventListener('loadedmetadata', handleLoad);
+            element.removeEventListener('error', handleError);
+            resolve();
+          }, 1000);
         });
         
-        audioElements.set(item.id, element);
+        if (!cancelledRef.current) {
+          audioElements.set(item.id, element);
+        }
       }
     }
     
+    audioElementsRef.current = audioElements;
     return audioElements;
   };
 
   // Mix audio at specific time
   const mixAudioAtTime = (time: number, audioElements: Map<string, HTMLAudioElement | HTMLVideoElement>, audioContext: AudioContext) => {
+    if (cancelledRef.current) return;
+
     const activeItems = timelineItems.filter(item =>
       time >= item.startTime && time < item.startTime + item.duration
     );
 
     // Set audio element times and play states
     audioElements.forEach((element, itemId) => {
+      if (cancelledRef.current) return;
+      
       const item = activeItems.find(item => item.id === itemId);
       if (item) {
         const relativeTime = time - item.startTime;
@@ -102,6 +137,8 @@ export const ExportDialog = ({
 
   // Render frame at specific time
   const renderFrame = async (time: number, ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement) => {
+    if (cancelledRef.current) return;
+
     // Clear canvas
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -113,6 +150,8 @@ export const ExportDialog = ({
 
     // Render each active item
     for (const item of activeItems) {
+      if (cancelledRef.current) break; // Controlla annullamento durante il rendering
+
       const relativeTime = time - item.startTime;
       const mediaOffset = item.mediaStartOffset || 0;
       const actualTime = relativeTime + mediaOffset;
@@ -124,7 +163,20 @@ export const ExportDialog = ({
         video.muted = true;
         
         await new Promise<void>((resolve) => {
-          video.addEventListener('loadeddata', () => {
+          if (cancelledRef.current) {
+            resolve();
+            return;
+          }
+
+          const handleLoad = () => {
+            video.removeEventListener('loadeddata', handleLoad);
+            video.removeEventListener('error', handleError);
+            
+            if (cancelledRef.current) {
+              resolve();
+              return;
+            }
+
             if (video.readyState >= 2) {
               try {
                 // Calculate dimensions maintaining aspect ratio
@@ -161,10 +213,22 @@ export const ExportDialog = ({
               }
             }
             resolve();
-          });
+          };
           
-          video.addEventListener('error', () => resolve());
-          setTimeout(() => resolve(), 100); // Fallback timeout
+          const handleError = () => {
+            video.removeEventListener('loadeddata', handleLoad);
+            video.removeEventListener('error', handleError);
+            resolve();
+          };
+
+          video.addEventListener('loadeddata', handleLoad);
+          video.addEventListener('error', handleError);
+          
+          setTimeout(() => {
+            video.removeEventListener('loadeddata', handleLoad);
+            video.removeEventListener('error', handleError);
+            resolve();
+          }, 100);
         });
       } else if (item.mediaFile.type === 'image') {
         const img = new Image();
@@ -172,7 +236,17 @@ export const ExportDialog = ({
         img.src = item.mediaFile.url;
         
         await new Promise<void>((resolve) => {
+          if (cancelledRef.current) {
+            resolve();
+            return;
+          }
+
           img.onload = () => {
+            if (cancelledRef.current) {
+              resolve();
+              return;
+            }
+
             try {
               const imgAspect = img.width / img.height;
               const canvasAspect = canvas.width / canvas.height;
@@ -208,15 +282,77 @@ export const ExportDialog = ({
           };
           
           img.onerror = () => resolve();
-          setTimeout(() => resolve(), 100); // Fallback timeout
+          setTimeout(() => resolve(), 100);
         });
       }
     }
   };
 
+  // Funzione per pulire tutte le risorse
+  const cleanupResources = () => {
+    // Ferma MediaRecorder se attivo
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      try {
+        mediaRecorderRef.current.stop();
+      } catch (error) {
+        console.warn('Error stopping MediaRecorder:', error);
+      }
+    }
+
+    // Pulisci audio elements
+    audioElementsRef.current.forEach(element => {
+      try {
+        element.pause();
+        element.src = '';
+        if (element.parentNode) {
+          element.parentNode.removeChild(element);
+        }
+      } catch (error) {
+        console.warn('Error cleaning audio element:', error);
+      }
+    });
+    audioElementsRef.current.clear();
+
+    // Pulisci audio context
+    if (audioContextRef.current) {
+      try {
+        audioContextRef.current.close();
+      } catch (error) {
+        console.warn('Error closing audio context:', error);
+      }
+      audioContextRef.current = null;
+    }
+
+    // Pulisci timeout
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+
+    // Pulisci URL se esistente
+    if (exportedVideoUrl) {
+      try {
+        URL.revokeObjectURL(exportedVideoUrl);
+      } catch (error) {
+        console.warn('Error revoking URL:', error);
+      }
+    }
+  };
+
+  // Funzione per annullare il rendering
+  const cancelExport = () => {
+    cancelledRef.current = true;
+    cleanupResources();
+    setProgress(0);
+    recordedChunksRef.current = [];
+  };
+
   // Export process
   useEffect(() => {
     if (!isOpen) {
+      // Reset completo quando il dialog si chiude
+      cancelledRef.current = false;
+      cleanupResources();
       setProgress(0);
       setStatus('preparing');
       setExportedVideoUrl(null);
@@ -224,11 +360,26 @@ export const ExportDialog = ({
       return;
     }
 
+    // Reset quando il dialog si apre
+    cancelledRef.current = false;
+    setProgress(0);
+    setStatus('preparing');
+    setExportedVideoUrl(null);
+    recordedChunksRef.current = [];
+
     const exportVideo = async () => {
       try {
+        if (cancelledRef.current) return;
+
         setStatus('preparing');
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise(resolve => {
+          timeoutRef.current = setTimeout(() => {
+            if (!cancelledRef.current) resolve(undefined);
+          }, 500);
+        });
         
+        if (cancelledRef.current) return;
+
         const canvas = canvasRef.current;
         if (!canvas) throw new Error('Canvas not available');
         
@@ -243,9 +394,13 @@ export const ExportDialog = ({
         const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
         audioContextRef.current = audioContext;
         
+        if (cancelledRef.current) return;
+
         // Create audio elements
         const audioElements = await createAudioElements();
         
+        if (cancelledRef.current) return;
+
         setStatus('rendering');
         
         // Create audio destination for mixing
@@ -253,6 +408,8 @@ export const ExportDialog = ({
         
         // Connect audio elements to destination
         audioElements.forEach((element) => {
+          if (cancelledRef.current) return;
+          
           try {
             const source = audioContext.createMediaElementSource(element);
             source.connect(audioDestination);
@@ -261,6 +418,8 @@ export const ExportDialog = ({
           }
         });
         
+        if (cancelledRef.current) return;
+
         // Combine canvas stream with audio
         const canvasStream = canvas.captureStream(30); // 30 FPS
         const audioStream = audioDestination.stream;
@@ -280,12 +439,14 @@ export const ExportDialog = ({
         recordedChunksRef.current = [];
         
         mediaRecorder.ondataavailable = (event) => {
-          if (event.data.size > 0) {
+          if (event.data.size > 0 && !cancelledRef.current) {
             recordedChunksRef.current.push(event.data);
           }
         };
         
         mediaRecorder.onstop = () => {
+          if (cancelledRef.current) return;
+
           const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
           const url = URL.createObjectURL(blob);
           setExportedVideoUrl(url);
@@ -294,7 +455,9 @@ export const ExportDialog = ({
           // Clean up audio elements
           audioElements.forEach(element => {
             element.pause();
-            element.remove();
+            if (element.parentNode) {
+              element.parentNode.removeChild(element);
+            }
           });
           
           // Clean up audio context
@@ -312,6 +475,8 @@ export const ExportDialog = ({
           document.body.removeChild(link);
         };
         
+        if (cancelledRef.current) return;
+
         mediaRecorder.start();
         
         // Calculate actual export duration
@@ -327,52 +492,62 @@ export const ExportDialog = ({
         let currentFrame = 0;
         
         const renderNextFrame = async () => {
-          if (currentFrame >= totalFrames) {
-            mediaRecorder.stop();
+          if (cancelledRef.current || currentFrame >= totalFrames) {
+            if (!cancelledRef.current) {
+              mediaRecorder.stop();
+            }
             return;
           }
           
           const currentTime = currentFrame / fps;
           
           // Mix audio at current time
-          mixAudioAtTime(currentTime, audioElements, audioContext);
+          if (!cancelledRef.current) {
+            mixAudioAtTime(currentTime, audioElements, audioContext);
+          }
           
           // Render video frame
-          await renderFrame(currentTime, ctx, canvas);
+          if (!cancelledRef.current) {
+            await renderFrame(currentTime, ctx, canvas);
+          }
+          
+          if (cancelledRef.current) return;
           
           currentFrame++;
           const progressPercent = (currentFrame / totalFrames) * 100;
           setProgress(progressPercent);
           
-          setTimeout(renderNextFrame, frameInterval);
+          timeoutRef.current = setTimeout(renderNextFrame, frameInterval);
         };
         
         renderNextFrame();
         
       } catch (error) {
         console.error('Export failed:', error);
-        setStatus('error');
+        if (!cancelledRef.current) {
+          setStatus('error');
+        }
       }
     };
 
     exportVideo();
   }, [isOpen, timelineItems, aspectRatio]);
 
+  // Gestione chiusura migliorata
   const handleClose = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-      mediaRecorderRef.current.stop();
-    }
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
-    }
-    if (exportedVideoUrl) {
-      URL.revokeObjectURL(exportedVideoUrl);
+    if (status === 'preparing' || status === 'rendering') {
+      // Se sta renderizzando, annulla il processo
+      cancelExport();
+    } else {
+      // Altrimenti chiudi normalmente
+      cleanupResources();
     }
     onClose();
   };
 
   const getStatusText = () => {
+    if (cancelledRef.current) return 'Export cancelled';
+    
     switch (status) {
       case 'preparing': return 'Preparing export...';
       case 'rendering': return 'Rendering video with audio...';
@@ -383,12 +558,24 @@ export const ExportDialog = ({
   };
 
   const getStatusColor = () => {
+    if (cancelledRef.current) return 'text-orange-500';
+    
     switch (status) {
       case 'preparing': return 'text-blue-500';
       case 'rendering': return 'text-yellow-500';
       case 'completed': return 'text-green-500';
       case 'error': return 'text-red-500';
       default: return 'text-gray-500';
+    }
+  };
+
+  const getStatusIcon = () => {
+    if (cancelledRef.current) return <AlertCircle className="w-5 h-5 text-orange-500" />;
+    
+    switch (status) {
+      case 'completed': return <CheckCircle className="w-5 h-5 text-green-500" />;
+      case 'error': return <X className="w-5 h-5 text-red-500" />;
+      default: return null;
     }
   };
 
@@ -432,9 +619,7 @@ export const ExportDialog = ({
                 <span className={`text-sm font-medium ${getStatusColor()}`}>
                   {getStatusText()}
                 </span>
-                {status === 'completed' && (
-                  <CheckCircle className="w-5 h-5 text-green-500" />
-                )}
+                {getStatusIcon()}
               </div>
               
               <Progress value={progress} className="w-full" />
@@ -468,9 +653,18 @@ export const ExportDialog = ({
                 onClick={handleClose}
                 variant={status === 'completed' ? 'default' : 'outline'}
                 size="sm"
-                disabled={status === 'preparing' || status === 'rendering'}
+                // RIMOSSO: disabled={status === 'preparing' || status === 'rendering'}
+                // Ora il pulsante è sempre abilitato per permettere l'annullamento
               >
-                {status === 'completed' ? 'Done' : 'Cancel'}
+                {status === 'preparing' || status === 'rendering' ? (
+                  'Cancel'
+                ) : status === 'completed' ? (
+                  'Done'
+                ) : cancelledRef.current ? (
+                  'Close'
+                ) : (
+                  'Close'
+                )}
               </Button>
             </div>
           </div>
