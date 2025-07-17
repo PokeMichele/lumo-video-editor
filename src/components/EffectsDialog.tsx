@@ -2,7 +2,7 @@ import { useState, useCallback } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { TrendingUp, TrendingDown, Sparkles, X } from "lucide-react";
+import { TrendingUp, TrendingDown, Sparkles, X, Info } from "lucide-react";
 import { TimelineItem } from "./VideoEditor";
 
 interface Effect {
@@ -11,6 +11,8 @@ interface Effect {
   description: string;
   icon: React.ComponentType<{ className?: string }>;
   category: 'transition' | 'visual' | 'audio';
+  duration: number; // Durata predefinita in secondi
+  previewHint: string; // Suggerimento per l'anteprima
 }
 
 interface EffectsDialogProps {
@@ -27,14 +29,18 @@ const AVAILABLE_EFFECTS: Effect[] = [
     name: 'Fade In',
     description: 'Gradually increase opacity from 0 to 100%',
     icon: TrendingUp,
-    category: 'transition'
+    category: 'transition',
+    duration: 2,
+    previewHint: 'Creates a smooth transition from transparent to opaque'
   },
   {
     id: 'fade-out',
     name: 'Fade Out',
     description: 'Gradually decrease opacity from 100% to 0',
     icon: TrendingDown,
-    category: 'transition'
+    category: 'transition',
+    duration: 2,
+    previewHint: 'Creates a smooth transition from opaque to transparent'
   }
 ];
 
@@ -79,13 +85,15 @@ export const EffectsDialog = ({
   const getEffectPreview = (effect: Effect) => {
     switch (effect.id) {
       case 'fade-in':
-        return 'opacity: 0 → 100%';
+        return `opacity: 0 → 100% (${effect.duration}s)`;
       case 'fade-out':
-        return 'opacity: 100% → 0';
+        return `opacity: 100% → 0 (${effect.duration}s)`;
       default:
-        return effect.description;
+        return `${effect.description} (${effect.duration}s)`;
     }
   };
+
+  const selectedEffectData = selectedEffect ? AVAILABLE_EFFECTS.find(e => e.id === selectedEffect) : null;
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
@@ -161,7 +169,7 @@ export const EffectsDialog = ({
                           w-12 h-12 rounded-xl flex items-center justify-center mb-3 transition-colors
                           ${isSelected
                             ? 'bg-primary text-primary-foreground'
-                            : 'bg-muted text-muted-foreground'
+                            : 'bg-red-600 text-white'
                           }
                         `}>
                           <IconComponent className="w-6 h-6" />
@@ -171,9 +179,14 @@ export const EffectsDialog = ({
                         <h4 className="font-medium text-sm mb-1">{effect.name}</h4>
 
                         {/* Preview Text */}
-                        <p className="text-xs text-muted-foreground line-clamp-2">
+                        <p className="text-xs text-muted-foreground line-clamp-2 mb-1">
                           {getEffectPreview(effect)}
                         </p>
+
+                        {/* Duration badge */}
+                        <span className="text-[10px] bg-red-500/20 text-red-600 px-2 py-0.5 rounded-full">
+                          {effect.duration}s
+                        </span>
 
                         {/* Selected Indicator */}
                         {isSelected && (
@@ -199,6 +212,54 @@ export const EffectsDialog = ({
               )}
             </div>
           </div>
+
+          {/* Right Sidebar - Effect Details */}
+          {selectedEffectData && (
+            <div className="w-64 space-y-4">
+              <div className="border rounded-lg p-4">
+                <h3 className="font-medium text-sm mb-3 flex items-center gap-2">
+                  <Info className="w-4 h-4" />
+                  Effect Details
+                </h3>
+                
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground mb-1">Name</p>
+                    <p className="text-sm">{selectedEffectData.name}</p>
+                  </div>
+                  
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground mb-1">Duration</p>
+                    <p className="text-sm">{selectedEffectData.duration} seconds</p>
+                  </div>
+                  
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground mb-1">Category</p>
+                    <p className="text-sm capitalize">{selectedEffectData.category}</p>
+                  </div>
+                  
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground mb-1">Description</p>
+                    <p className="text-xs text-muted-foreground">{selectedEffectData.description}</p>
+                  </div>
+                  
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground mb-1">Preview</p>
+                    <p className="text-xs text-muted-foreground">{selectedEffectData.previewHint}</p>
+                  </div>
+                </div>
+
+                {/* Color indicator per la timeline */}
+                <div className="mt-3 pt-3 border-t">
+                  <p className="text-xs font-medium text-muted-foreground mb-2">Timeline Appearance</p>
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 bg-red-600 rounded border"></div>
+                    <span className="text-xs text-muted-foreground">Effects appear in red</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Footer */}
@@ -209,6 +270,11 @@ export const EffectsDialog = ({
                 Selected: <span className="font-medium">
                   {AVAILABLE_EFFECTS.find(e => e.id === selectedEffect)?.name}
                 </span>
+                {selectedItemId ? (
+                  <span className="ml-2 text-xs">(will be applied to selected item)</span>
+                ) : (
+                  <span className="ml-2 text-xs">(will be added at current time)</span>
+                )}
               </>
             ) : (
               'Select an effect to apply'
@@ -235,4 +301,3 @@ export const EffectsDialog = ({
     </Dialog>
   );
 };
-{/* End */}

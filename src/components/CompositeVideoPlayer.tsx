@@ -58,6 +58,61 @@ export const CompositeVideoPlayer = ({
     ).sort((a, b) => a.track - b.track);
   }, [timelineItems, currentTime]);
 
+  // AGGIORNATO: Funzione per applicare effetti al canvas
+  const applyEffect = useCallback((ctx: CanvasRenderingContext2D, effectType: string, progress: number, canvasWidth: number, canvasHeight: number) => {
+    switch (effectType) {
+      case 'fade-in':
+        // Fade in: alpha va da 0 a 1 durante la durata dell'effetto
+        const fadeInAlpha = Math.min(progress, 1);
+        ctx.globalAlpha = fadeInAlpha;
+        break;
+        
+      case 'fade-out':
+        // Fade out: alpha va da 1 a 0 durante la durata dell'effetto
+        const fadeOutAlpha = Math.max(1 - progress, 0);
+        ctx.globalAlpha = fadeOutAlpha;
+        break;
+        
+      default:
+        // Effetto non riconosciuto, non fare nulla
+        break;
+    }
+  }, []);
+
+  // AGGIORNATO: Funzione per renderizzare gli effetti
+  const renderEffect = useCallback((ctx: CanvasRenderingContext2D, effect: TimelineItem, canvasWidth: number, canvasHeight: number) => {
+    if (!effect.mediaFile.effectType) return;
+
+    const relativeTime = currentTime - effect.startTime;
+    const progress = relativeTime / effect.duration; // 0 a 1
+
+    // Salva il contesto corrente
+    ctx.save();
+
+    // Applica l'effetto
+    applyEffect(ctx, effect.mediaFile.effectType, progress, canvasWidth, canvasHeight);
+
+    // Disegna un overlay semitrasparente per visualizzare l'effetto in preview
+    if (effect.mediaFile.effectType === 'fade-in' || effect.mediaFile.effectType === 'fade-out') {
+      // Per i fade, mostriamo un sottile overlay colorato ai bordi
+      ctx.strokeStyle = '#ff0000';
+      ctx.lineWidth = 4;
+      ctx.setLineDash([10, 5]);
+      ctx.strokeRect(2, 2, canvasWidth - 4, canvasHeight - 4);
+      
+      // Testo dell'effetto nell'angolo
+      ctx.fillStyle = 'rgba(255, 0, 0, 0.8)';
+      ctx.fillRect(10, 10, 120, 30);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '14px Arial';
+      ctx.textAlign = 'left';
+      ctx.fillText(`${effect.mediaFile.name}`, 15, 30);
+    }
+
+    // Ripristina il contesto
+    ctx.restore();
+  }, [currentTime, applyEffect]);
+
   // OTTIMIZZAZIONE: Throttled render function
   const renderComposite = useCallback(() => {
     const now = performance.now();
@@ -92,8 +147,12 @@ export const CompositeVideoPlayer = ({
       return;
     }
 
-    // OTTIMIZZAZIONE: Batch rendering degli elementi attivi
-    activeItems.forEach(item => {
+    // AGGIORNATO: Separa gli elementi media dagli effetti
+    const mediaItems = activeItems.filter(item => item.mediaFile.type !== 'effect');
+    const effectItems = activeItems.filter(item => item.mediaFile.type === 'effect');
+
+    // Prima renderizza tutti gli elementi media
+    mediaItems.forEach(item => {
       const relativeTime = currentTime - item.startTime;
       
       try {
@@ -179,9 +238,18 @@ export const CompositeVideoPlayer = ({
         console.warn(`Error rendering item ${item.id}:`, error);
       }
     });
-  }, [activeItems, currentTime, canvasDimensions]);
 
-  // OTTIMIZZAZIONE: Miglior gestione elementi media
+    // NUOVO: Poi applica tutti gli effetti sopra il contenuto media
+    effectItems.forEach(effect => {
+      try {
+        renderEffect(ctx, effect, canvas.width, canvas.height);
+      } catch (error) {
+        console.warn(`Error rendering effect ${effect.id}:`, error);
+      }
+    });
+  }, [activeItems, currentTime, canvasDimensions, renderEffect]);
+
+  // AGGIORNATO: Gestione elementi media migliorata - ora gestisce anche gli effetti
   useEffect(() => {
     const container = hiddenVideoContainerRef.current;
     if (!container) return;
@@ -211,7 +279,7 @@ export const CompositeVideoPlayer = ({
       }
     });
 
-    // Crea solo elementi nuovi
+    // Crea solo elementi nuovi (escludendo gli effetti che non hanno elementi media)
     timelineItems.forEach(item => {
       if (item.mediaFile.type === 'video' && !videoElementsRef.current.has(item.id)) {
         const video = document.createElement('video');
@@ -245,6 +313,7 @@ export const CompositeVideoPlayer = ({
         img.src = item.mediaFile.url;
         imageElementsRef.current.set(item.id, img);
       }
+      // NUOVO: Gli effetti non creano elementi media, vengono gestiti direttamente nel rendering
     });
   }, [timelineItems, volume]);
 
@@ -252,9 +321,12 @@ export const CompositeVideoPlayer = ({
   useEffect(() => {
     const syncTolerance = 0.1; // Ridotta la tolleranza per miglior precisione
     
+    // AGGIORNATO: Filtra solo gli elementi media attivi (escludendo gli effetti)
+    const activeMediaItems = activeItems.filter(item => item.mediaFile.type !== 'effect');
+    
     // Gestisci video
     videoElementsRef.current.forEach((video, itemId) => {
-      const item = activeItems.find(item => item.id === itemId);
+      const item = activeMediaItems.find(item => item.id === itemId);
       if (item) {
         const relativeTime = currentTime - item.startTime;
         const mediaOffset = item.mediaStartOffset || 0;
@@ -280,7 +352,7 @@ export const CompositeVideoPlayer = ({
 
     // Gestisci audio
     audioElementsRef.current.forEach((audio, itemId) => {
-      const item = activeItems.find(item => item.id === itemId);
+      const item = activeMediaItems.find(item => item.id === itemId);
       if (item) {
         const relativeTime = currentTime - item.startTime;
         const mediaOffset = item.mediaStartOffset || 0;

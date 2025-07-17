@@ -14,6 +14,7 @@ interface TimelineProps {
   totalDuration: number;
   tracks: Track[];
   onTracksChange: (tracks: Track[]) => void;
+  onItemSelect?: (itemId: string | undefined) => void;
 }
 
 export interface Track {
@@ -43,7 +44,8 @@ export const Timeline = ({
   onItemsChangeWithHistory,
   totalDuration,
   tracks,
-  onTracksChange
+  onTracksChange,
+  onItemSelect
 }: TimelineProps) => {
   const timelineHeaderContentRef = useRef<HTMLDivElement>(null);
   const timelineContentRef = useRef<HTMLDivElement>(null);
@@ -162,7 +164,7 @@ export const Timeline = ({
   const handlePasteKeyboard = () => {
     // Trova la traccia più appropriata in base al tipo di contenuto
     const getTargetTrack = (mediaType: string) => {
-      if (mediaType === 'video' || mediaType === 'image') {
+      if (mediaType === 'video' || mediaType === 'image' || mediaType === 'effect') {
         return tracks.find(t => t.type === 'video')?.index || 0;
       } else if (mediaType === 'audio') {
         return tracks.find(t => t.type === 'audio')?.index || 1;
@@ -209,6 +211,10 @@ export const Timeline = ({
       const newItems = items.filter(item => !selectedItems.has(item.id));
       onItemsChangeWithHistory(newItems);
       setSelectedItems(new Set());
+      // Deseleziona anche nell'editor principale
+      if (onItemSelect) {
+        onItemSelect(undefined);
+      }
     }
   };
 
@@ -424,12 +430,12 @@ export const Timeline = ({
     return null;
   }, [scale, snapThreshold]);
 
-  // Validate track compatibility con sistema dinamico
+  // Validate track compatibility con sistema dinamico - AGGIORNATO per supportare effetti
   const isValidTrack = useCallback((trackIndex: number, mediaType: string) => {
     const track = tracks.find(t => t.index === trackIndex);
     if (!track) return false;
     
-    if (mediaType === 'video' || mediaType === 'image') {
+    if (mediaType === 'video' || mediaType === 'image' || mediaType === 'effect') {
       return track.type === 'video';
     }
     if (mediaType === 'audio') {
@@ -702,6 +708,11 @@ export const Timeline = ({
       onItemsChangeWithHistory(items.filter(item => item.id !== itemId));
     }
     setContextMenu(null);
+    
+    // Deseleziona anche nell'editor principale
+    if (onItemSelect) {
+      onItemSelect(undefined);
+    }
   };
 
   // Handle item selection
@@ -723,6 +734,10 @@ export const Timeline = ({
     } else {
       // Click normale: seleziona solo questo elemento
       setSelectedItems(new Set([item.id]));
+      // Notifica l'editor principale della selezione
+      if (onItemSelect) {
+        onItemSelect(item.id);
+      }
     }
   };
 
@@ -747,6 +762,9 @@ export const Timeline = ({
       // Se l'elemento non è selezionato e non si tiene Ctrl, selezionalo
       if (!selectedItems.has(item.id) && !(e.ctrlKey || e.metaKey)) {
         setSelectedItems(new Set([item.id]));
+        if (onItemSelect) {
+          onItemSelect(item.id);
+        }
       }
 
       // Prepara dati per drag multiplo
@@ -803,6 +821,9 @@ export const Timeline = ({
       // Pulisci selezione se non si tiene Ctrl
       if (!(e.ctrlKey || e.metaKey)) {
         setSelectedItems(new Set());
+        if (onItemSelect) {
+          onItemSelect(undefined);
+        }
       }
     }
   };
@@ -1127,10 +1148,12 @@ export const Timeline = ({
     const width = item.duration * scale;
     const topPosition = track * 60 + 8;
 
+    // AGGIORNATO: Aggiunto supporto per effetti
     const trackColors = {
       video: 'bg-blue-600',
       audio: 'bg-green-600',
-      image: 'bg-purple-600'
+      image: 'bg-purple-600',
+      effect: 'bg-red-600' // Nuovo colore per gli effetti
     };
 
     return (
@@ -1180,8 +1203,8 @@ export const Timeline = ({
           }
         }}
       >
-        {/* Resize handles - SOLO per immagini e non durante drag multiplo */}
-        {item.mediaFile.type === 'image' && !isPartOfDrag && (
+        {/* Resize handles - SOLO per immagini ed effetti (NON per video/audio) e non durante drag multiplo */}
+        {(item.mediaFile.type === 'image' || item.mediaFile.type === 'effect') && !isPartOfDrag && (
           <>
             <div
               className="absolute left-0 top-0 w-1 h-full cursor-ew-resize opacity-0 group-hover:opacity-100 bg-white/50"
@@ -1213,6 +1236,12 @@ export const Timeline = ({
           {isCutItem && !isPartOfDrag && (
             <div className="absolute -top-1 -right-1 bg-orange-500 text-white text-[8px] rounded-full w-3 h-3 flex items-center justify-center">
               ✂
+            </div>
+          )}
+          {/* Indicatore specifico per effetti */}
+          {item.mediaFile.type === 'effect' && (
+            <div className="absolute top-1 right-1 text-[10px] text-white/80">
+              ✨
             </div>
           )}
         </div>

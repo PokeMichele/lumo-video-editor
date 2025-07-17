@@ -11,10 +11,11 @@ import { useToast } from "@/hooks/use-toast";
 export interface MediaFile {
   id: string;
   name: string;
-  type: 'video' | 'audio' | 'image';
+  type: 'video' | 'audio' | 'image' | 'effect';
   url: string;
   duration: number;
-  file: File;
+  file?: File; // Opzionale per gli effetti
+  effectType?: string; // Per identificare il tipo di effetto
 }
 
 export interface TimelineItem {
@@ -170,17 +171,67 @@ export const VideoEditor = () => {
   };
 
   const handleApplyEffect = (effectId: string, itemId?: string) => {
-    // TODO: Implement effect application logic
-    console.log(`Applying effect ${effectId} to item ${itemId || 'all items'}`);
+    // Trova la prima track video disponibile
+    const firstVideoTrack = tracks.find(track => track.type === 'video');
+    if (!firstVideoTrack) {
+      toast({
+        title: "No Video Track Available",
+        description: "Please add a video track before applying effects.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Crea un nuovo MediaFile per l'effetto
+    const effectName = effectId.split('-').map(word => 
+      word.charAt(0).toUpperCase() + word.slice(1)
+    ).join(' ');
+
+    const effectMediaFile: MediaFile = {
+      id: `effect-${effectId}-${Date.now()}`,
+      name: effectName,
+      type: 'effect',
+      url: '', // Gli effetti non hanno URL
+      duration: 2, // Durata predefinita di 2 secondi
+      effectType: effectId
+    };
+
+    // Aggiungi l'effetto anche alla lista dei media files per coerenza
+    setMediaFiles(prev => [...prev, effectMediaFile]);
+
+    // Calcola la posizione ottimale per l'effetto
+    let targetStartTime = currentTime;
+    
+    // Se un elemento è selezionato, posiziona l'effetto all'inizio di quell'elemento
+    if (selectedTimelineItemId) {
+      const selectedItem = timelineItems.find(item => item.id === selectedTimelineItemId);
+      if (selectedItem) {
+        targetStartTime = selectedItem.startTime;
+      }
+    }
+
+    // Crea un nuovo TimelineItem per l'effetto
+    const newEffectItem: TimelineItem = {
+      id: `timeline-effect-${Date.now()}-${Math.random()}`,
+      mediaFile: effectMediaFile,
+      startTime: targetStartTime,
+      duration: 2, // Durata predefinita di 2 secondi
+      track: firstVideoTrack.index,
+      mediaStartOffset: 0
+    };
+
+    // Aggiungi l'effetto alla timeline
+    const newItems = [...timelineItems, newEffectItem];
+    setTimelineItems(newItems);
+    saveToHistory(newItems);
 
     toast({
       title: "Effect Applied",
-      description: `${effectId.replace('-', ' ')} has been applied successfully.`,
+      description: `${effectName} has been added to the timeline at ${targetStartTime.toFixed(1)}s.`,
     });
 
-    // For now, just log the effect application
-    // In a real implementation, you would modify the timeline items
-    // to include effect metadata that would be processed during rendering
+    // Chiudi il dialog degli effetti
+    setIsEffectsDialogOpen(false);
   };
 
   return (
@@ -269,6 +320,7 @@ export const VideoEditor = () => {
           totalDuration={totalDuration}
           tracks={tracks}
           onTracksChange={handleTracksChange}
+          onItemSelect={setSelectedTimelineItemId}
         />
       </div>
 

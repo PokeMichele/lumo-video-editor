@@ -1,5 +1,5 @@
 import { useState, useRef, DragEvent } from "react";
-import { Upload, File, Music, Video, Image as ImageIcon, Undo2, Redo2 } from "lucide-react";
+import { Upload, File, Music, Video, Image as ImageIcon, Undo2, Redo2, Sparkles } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { MediaFile, TimelineItem } from "./VideoEditor";
@@ -110,9 +110,9 @@ export const FilesBrowser = ({
     });
   };
 
-  // Trova la prima traccia disponibile del tipo specificato
-  const findFirstAvailableTrack = (mediaType: 'video' | 'audio' | 'image'): Track | null => {
-    const targetType = (mediaType === 'video' || mediaType === 'image') ? 'video' : 'audio';
+  // AGGIORNATO: Trova la prima traccia disponibile del tipo specificato - ora include 'effect'
+  const findFirstAvailableTrack = (mediaType: 'video' | 'audio' | 'image' | 'effect'): Track | null => {
+    const targetType = (mediaType === 'video' || mediaType === 'image' || mediaType === 'effect') ? 'video' : 'audio';
     
     // Trova tutte le tracce del tipo corretto, ordinate per indice
     const relevantTracks = tracks
@@ -178,6 +178,38 @@ export const FilesBrowser = ({
   const getTargetTrackName = (file: MediaFile): string => {
     const availableTrack = findFirstAvailableTrack(file.type);
     return availableTrack ? availableTrack.label : 'Unknown Track';
+  };
+
+  // AGGIORNATO: Funzione per ottenere l'icona appropriata per il tipo di file
+  const getFileIcon = (file: MediaFile) => {
+    switch (file.type) {
+      case 'video':
+        return <Video className="w-4 h-4 text-video-track flex-shrink-0" />;
+      case 'audio':
+        return <Music className="w-4 h-4 text-audio-track flex-shrink-0" />;
+      case 'image':
+        return <ImageIcon className="w-4 h-4 text-image-icon flex-shrink-0" />;
+      case 'effect':
+        return <Sparkles className="w-4 h-4 text-red-500 flex-shrink-0" />;
+      default:
+        return <File className="w-4 h-4 text-muted-foreground flex-shrink-0" />;
+    }
+  };
+
+  // AGGIORNATO: Funzione per ottenere il colore del testo del badge basato sul tipo
+  const getFileTypeColor = (type: string) => {
+    switch (type) {
+      case 'video':
+        return 'text-blue-600';
+      case 'audio':
+        return 'text-green-600';
+      case 'image':
+        return 'text-purple-600';
+      case 'effect':
+        return 'text-red-600';
+      default:
+        return 'text-muted-foreground';
+    }
   };
 
   return (
@@ -282,20 +314,26 @@ export const FilesBrowser = ({
               <Card key={file.id} className="p-3 hover:bg-accent/50 transition-colors">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-3 flex-1 min-w-0">
-                    {file.type === 'video' ? (
-                      <Video className="w-4 h-4 text-video-track flex-shrink-0" />
-                    ) : file.type === 'audio' ? (
-                      <Music className="w-4 h-4 text-audio-track flex-shrink-0" />
-                    ) : (
-                      <ImageIcon className="w-4 h-4 text-image-icon flex-shrink-0" />
-                    )}
+                    {getFileIcon(file)}
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-foreground truncate">
                         {file.name}
                       </p>
-                      <p className="text-xs text-muted-foreground">
-                        {Math.round(file.duration)}s → {getTargetTrackName(file)}
-                      </p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-xs text-muted-foreground">
+                          {Math.round(file.duration)}s → {getTargetTrackName(file)}
+                        </p>
+                        {/* Badge per indicare il tipo di file */}
+                        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${getFileTypeColor(file.type)} bg-current/10`}>
+                          {file.type.toUpperCase()}
+                        </span>
+                        {/* Badge speciale per gli effetti */}
+                        {file.type === 'effect' && file.effectType && (
+                          <span className="text-[10px] text-red-500 bg-red-500/10 px-1.5 py-0.5 rounded">
+                            {file.effectType.toUpperCase()}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
                   <Button
