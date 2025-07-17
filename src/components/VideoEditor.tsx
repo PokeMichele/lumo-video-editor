@@ -3,6 +3,7 @@ import { FilesBrowser } from "./FilesBrowser";
 import { CompositeVideoPlayer } from "./CompositeVideoPlayer";
 import { Timeline, Track } from "./Timeline";
 import { ExportDialog } from "./ExportDialog";
+import { EffectsDialog } from "./EffectsDialog";
 import { Button } from "@/components/ui/button";
 import { Download } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -39,14 +40,16 @@ export const VideoEditor = () => {
   const [historyIndex, setHistoryIndex] = useState(0);
   const [aspectRatio, setAspectRatio] = useState<'16:9' | '4:3' | '9:16'>('16:9');
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
-  
+  const [isEffectsDialogOpen, setIsEffectsDialogOpen] = useState(false);
+  const [selectedTimelineItemId, setSelectedTimelineItemId] = useState<string | undefined>();
+
   // Gestione tracce dinamiche
   const [tracks, setTracks] = useState<Track[]>([
     { id: 'video-0', type: 'video', index: 0, label: 'Video 1' },
     { id: 'audio-0', type: 'audio', index: 1, label: 'Audio 1' },
     { id: 'audio-1', type: 'audio', index: 2, label: 'Audio 2' }
   ]);
-  
+
   const { toast } = useToast();
 
   // Keyboard shortcuts for undo/redo
@@ -162,6 +165,24 @@ export const VideoEditor = () => {
     setIsExportDialogOpen(true);
   };
 
+  const handleOpenEffects = () => {
+    setIsEffectsDialogOpen(true);
+  };
+
+  const handleApplyEffect = (effectId: string, itemId?: string) => {
+    // TODO: Implement effect application logic
+    console.log(`Applying effect ${effectId} to item ${itemId || 'all items'}`);
+
+    toast({
+      title: "Effect Applied",
+      description: `${effectId.replace('-', ' ')} has been applied successfully.`,
+    });
+
+    // For now, just log the effect application
+    // In a real implementation, you would modify the timeline items
+    // to include effect metadata that would be processed during rendering
+  };
+
   return (
     <div className="h-screen flex flex-col bg-background">
       {/* Main Content Area */}
@@ -202,7 +223,7 @@ export const VideoEditor = () => {
                   </Button>
                 ))}
               </div>
-              
+
               <Button
                 onClick={handleExport}
                 className="bg-gradient-primary hover:opacity-90 shadow-elegant"
@@ -229,7 +250,7 @@ export const VideoEditor = () => {
           <div className="h-16 bg-muted/10 flex items-center justify-center px-6 border-b border-border">
             <div className="flex items-center space-x-3">
               <span className="text-sm font-medium text-muted-foreground">Quick Tools:</span>
-              <Button variant="outline" size="sm">Effects</Button>
+              <Button variant="outline" size="sm" onClick={handleOpenEffects}>Effects</Button>
               <Button variant="outline" size="sm">Colors</Button>
               <Button variant="outline" size="sm">Audio Mixer</Button>
             </div>
@@ -258,6 +279,15 @@ export const VideoEditor = () => {
         timelineItems={timelineItems}
         totalDuration={totalDuration}
         aspectRatio={aspectRatio}
+      />
+
+      {/* Effects Dialog */}
+      <EffectsDialog
+        isOpen={isEffectsDialogOpen}
+        onClose={() => setIsEffectsDialogOpen(false)}
+        timelineItems={timelineItems}
+        selectedItemId={selectedTimelineItemId}
+        onApplyEffect={handleApplyEffect}
       />
     </div>
   );
