@@ -171,7 +171,7 @@ export const VideoEditor = () => {
     setIsEffectsDialogOpen(true);
   };
 
-  // AGGIORNATO: Funzione per applicare effetti con durate dinamiche e intensità
+  // CORRETTO: Funzione per applicare effetti con posizionamento preciso al cursore
   const handleApplyEffect = (effectId: string, itemId?: string, intensity?: number) => {
     // Trova la prima track video disponibile
     const firstVideoTrack = tracks.find(track => track.type === 'video');
@@ -184,7 +184,7 @@ export const VideoEditor = () => {
       return;
     }
 
-    // AGGIORNATO: Definisci le durate predefinite per ogni effetto
+    // Definisci le durate predefinite per ogni effetto
     const effectDurations: { [key: string]: number } = {
       'fade-in': 2,
       'fade-out': 2,
@@ -198,27 +198,28 @@ export const VideoEditor = () => {
       word.charAt(0).toUpperCase() + word.slice(1)
     ).join(' ');
 
-    // AGGIORNATO: Usa la durata specifica dell'effetto
-    const effectDuration = effectDurations[effectId] || 2; // Default 2 secondi se non specificato
+    const effectDuration = effectDurations[effectId] || 2;
 
     const effectMediaFile: MediaFile = {
       id: `effect-${effectId}-${Date.now()}`,
       name: effectName,
       type: 'effect',
       url: '', // Gli effetti non hanno URL
-      duration: effectDuration, // AGGIORNATO: Usa durata dinamica
+      duration: effectDuration,
       effectType: effectId,
-      effectIntensity: intensity // NUOVO: Salva l'intensità dell'effetto
+      effectIntensity: intensity
     };
 
     // Aggiungi l'effetto anche alla lista dei media files per coerenza
     setMediaFiles(prev => [...prev, effectMediaFile]);
 
-    // Calcola la posizione ottimale per l'effetto
+    // CORRETTO: Posiziona SEMPRE l'effetto al currentTime (cursore rosso)
+    // Gli effetti devono essere sovrapposti ai contenuti esistenti, non posizionati dopo
     let targetStartTime = currentTime;
     
     // Se un elemento è selezionato, posiziona l'effetto all'inizio di quell'elemento
-    if (selectedTimelineItemId) {
+    // SOLO se specificamente richiesto, altrimenti usa sempre currentTime
+    if (selectedTimelineItemId && itemId) {
       const selectedItem = timelineItems.find(item => item.id === selectedTimelineItemId);
       if (selectedItem) {
         targetStartTime = selectedItem.startTime;
@@ -229,9 +230,9 @@ export const VideoEditor = () => {
     const newEffectItem: TimelineItem = {
       id: `timeline-effect-${Date.now()}-${Math.random()}`,
       mediaFile: effectMediaFile,
-      startTime: targetStartTime,
-      duration: effectDuration, // AGGIORNATO: Usa la durata specifica dell'effetto
-      track: firstVideoTrack.index,
+      startTime: targetStartTime, // Usa sempre la posizione del cursore o elemento selezionato
+      duration: effectDuration,
+      track: firstVideoTrack.index, // Gli effetti vanno sempre sulla traccia video
       mediaStartOffset: 0
     };
 
@@ -240,7 +241,7 @@ export const VideoEditor = () => {
     setTimelineItems(newItems);
     saveToHistory(newItems);
 
-    // AGGIORNATO: Messaggio con intensità per effetti zoom
+    // Messaggio con intensità per effetti zoom
     const intensityText = intensity !== undefined ? ` (${intensity}% intensity)` : '';
     toast({
       title: "Effect Applied",

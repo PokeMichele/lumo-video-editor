@@ -240,9 +240,9 @@ export const EffectsDialog = ({
                           {effect.duration}s
                         </span>
 
-                        {/* Intensity Control Indicator */}
+                        {/* CORRETTO: Intensity Control Indicator - ora rosso */}
                         {effect.hasIntensityControl && (
-                          <div className="absolute top-2 left-2 w-3 h-3 bg-blue-500 rounded-full flex items-center justify-center">
+                          <div className="absolute top-2 left-2 w-3 h-3 bg-red-500 rounded-full flex items-center justify-center">
                             <div className="w-1 h-1 bg-white rounded-full" />
                           </div>
                         )}
@@ -297,7 +297,7 @@ export const EffectsDialog = ({
                     <p className="text-sm capitalize">{selectedEffectData.category}</p>
                   </div>
 
-                  {/* NUOVO: Controllo Intensità per effetti Zoom */}
+                  {/* Controllo Intensità per effetti Zoom */}
                   {selectedEffectData.hasIntensityControl && (
                     <div>
                       <p className="text-xs font-medium text-muted-foreground mb-2">
@@ -348,7 +348,7 @@ export const EffectsDialog = ({
                   </div>
                   {selectedEffectData.hasIntensityControl && (
                     <div className="flex items-center gap-2 mt-1">
-                      <div className="w-4 h-4 bg-blue-500 rounded-full border"></div>
+                      <div className="w-4 h-4 bg-red-500 rounded-full border"></div>
                       <span className="text-xs text-muted-foreground">Customizable intensity</span>
                     </div>
                   )}
