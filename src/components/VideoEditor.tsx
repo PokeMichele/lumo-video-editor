@@ -41,6 +41,7 @@ export const VideoEditor = () => {
   const [history, setHistory] = useState<HistoryState[]>([{ timelineItems: [], currentTime: 0 }]);
   const [historyIndex, setHistoryIndex] = useState(0);
   const [aspectRatio, setAspectRatio] = useState<'16:9' | '4:3' | '9:16'>('16:9');
+  const [exportFPS, setExportFPS] = useState<24 | 30 | 60>(30); // Nuovo state per FPS
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
   const [isEffectsDialogOpen, setIsEffectsDialogOpen] = useState(false);
   const [selectedTimelineItemId, setSelectedTimelineItemId] = useState<string | undefined>();
@@ -292,6 +293,22 @@ export const VideoEditor = () => {
                 ))}
               </div>
 
+              {/* FPS Selection Buttons */}
+              <div className="flex items-center gap-1 bg-background/80 backdrop-blur-sm border border-border rounded-lg p-1">
+                <span className="text-xs text-muted-foreground px-2">FPS:</span>
+                {([24, 30, 60] as const).map((fps) => (
+                  <Button
+                    key={fps}
+                    onClick={() => setExportFPS(fps)}
+                    variant={exportFPS === fps ? "default" : "ghost"}
+                    size="sm"
+                    className="h-8 px-2 text-xs font-medium"
+                  >
+                    {fps}
+                  </Button>
+                ))}
+              </div>
+
               <Button
                 onClick={handleExport}
                 className="bg-gradient-primary hover:opacity-90 shadow-elegant"
@@ -348,6 +365,7 @@ export const VideoEditor = () => {
         timelineItems={timelineItems}
         totalDuration={totalDuration}
         aspectRatio={aspectRatio}
+        selectedFPS={exportFPS}
       />
 
       {/* Effects Dialog */}

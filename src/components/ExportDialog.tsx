@@ -11,6 +11,7 @@ interface ExportDialogProps {
   timelineItems: TimelineItem[];
   totalDuration: number;
   aspectRatio: '16:9' | '4:3' | '9:16';
+  selectedFPS: 24 | 30 | 60; // Nuovo parametro per FPS selezionati
 }
 
 interface MediaElementCache {
@@ -24,7 +25,8 @@ export const ExportDialog = ({
   onClose, 
   timelineItems, 
   totalDuration, 
-  aspectRatio 
+  aspectRatio,
+  selectedFPS 
 }: ExportDialogProps) => {
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState<'preparing' | 'rendering' | 'completed' | 'error'>('preparing');
@@ -215,7 +217,8 @@ export const ExportDialog = ({
           const video = document.createElement('video');
           video.src = item.mediaFile.url;
           video.crossOrigin = 'anonymous';
-          video.muted = true; // Muted per export, audio gestito separatamente
+          video.muted = false; // CORRETTO: Non mutare per includere l'audio nell'export
+          video.volume = 1.0; // Volume massimo per l'export
           video.preload = 'auto';
           video.playsInline = true;
           
@@ -332,7 +335,7 @@ export const ExportDialog = ({
       masterGain.gain.value = 1.0;
       masterGain.connect(destination);
       
-      // Connetti tutti gli elementi audio (solo audio e video)
+      // CORRETTO: Connetti tutti gli elementi audio E video (non solo audio e video separati)
       const audioPromises = timelineItems
         .filter(item => item.mediaFile.type === 'audio' || item.mediaFile.type === 'video')
         .map(async (item) => {
@@ -342,6 +345,10 @@ export const ExportDialog = ({
               : mediaCache.current.audios.get(item.id);
             
             if (element) {
+              // Assicurati che l'elemento non sia mutato
+              element.muted = false;
+              element.volume = 1.0;
+              
               const source = audioContext.createMediaElementSource(element);
               const gainNode = audioContext.createGain();
               gainNode.gain.value = 1.0;
@@ -349,7 +356,7 @@ export const ExportDialog = ({
               source.connect(gainNode);
               gainNode.connect(masterGain);
               
-              return { element, source, gainNode };
+              return { element, source, gainNode, itemType: item.mediaFile.type };
             }
           } catch (error) {
             console.warn(`Error setting up audio for ${item.id}:`, error);
@@ -537,7 +544,7 @@ export const ExportDialog = ({
     }
   }, [timelineItems, calculateGlobalAlpha, isBlackWhiteActive, calculateZoomScale, calculateBlurIntensity]);
 
-  // OTTIMIZZAZIONE: Sync audio migliorato
+  // CORRETTO: Sync audio migliorato per video e audio
   const syncAudio = useCallback((time: number, audioNodes: any[]) => {
     if (cancelledRef.current) return;
 
@@ -563,6 +570,10 @@ export const ExportDialog = ({
         const targetTime = relativeTime + mediaOffset;
 
         if (targetTime >= 0 && targetTime <= node.element.duration) {
+          // CORRETTO: Assicurati che l'elemento non sia mutato
+          node.element.muted = false;
+          node.element.volume = 1.0;
+          
           if (Math.abs(node.element.currentTime - targetTime) > 0.05) {
             node.element.currentTime = targetTime;
           }
@@ -680,18 +691,13 @@ export const ExportDialog = ({
 
       setStatus('rendering');
 
-      // OTTIMIZZAZIONE: Calcola parametri di export ottimali
+      // AGGIORNATO: Usa FPS selezionato dall'utente invece di calcolarlo
       const maxEndTime = timelineItems.reduce((max, item) => {
         return Math.max(max, item.startTime + item.duration);
       }, 0);
 
       const exportDuration = Math.max(maxEndTime, 1);
-      let targetFPS = 30;
-      
-      // Adatta FPS in base alla complessità
-      const complexity = timelineItems.length * (dimensions.width * dimensions.height / 1000000);
-      if (complexity > 10) targetFPS = 24;
-      if (complexity > 20) targetFPS = 20;
+      const targetFPS = selectedFPS; // Usa FPS selezionato dall'utente
       
       setFps(targetFPS);
 
@@ -936,12 +942,10 @@ export const ExportDialog = ({
                 <span className="text-muted-foreground">Timeline Items:</span>
                 <span className="font-medium">{timelineItems.length}</span>
               </div>
-              {fps > 0 && (
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Frame Rate:</span>
-                  <span className="font-medium">{fps} fps</span>
-                </div>
-              )}
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Frame Rate:</span>
+                <span className="font-medium">{selectedFPS} fps</span>
+              </div>
             </div>
 
             {/* Progress Section */}
