@@ -113,6 +113,38 @@ export const ExportDialog = ({
     );
   }, [timelineItems]);
 
+  // NUOVO: Funzione per calcolare il fattore di scala per effetti zoom (per export)
+  const calculateZoomScale = useCallback((time: number) => {
+    const activeZoomEffects = timelineItems.filter(item =>
+      item.mediaFile.type === 'effect' &&
+      (item.mediaFile.effectType === 'zoom-in' || item.mediaFile.effectType === 'zoom-out') &&
+      time >= item.startTime &&
+      time < item.startTime + item.duration
+    );
+
+    let zoomScale = 1.0;
+
+    activeZoomEffects.forEach(effect => {
+      const relativeTime = time - effect.startTime;
+      const progress = relativeTime / effect.duration; // 0 a 1
+      const effectIntensity = effect.mediaFile.effectIntensity || 50;
+
+      if (effect.mediaFile.effectType === 'zoom-in') {
+        // Zoom in: scala da 1.0 al valore finale
+        const maxScale = 1 + (effectIntensity / 100) * 2; // Da 1.0 a 3.0
+        const currentScale = 1 + (progress * (maxScale - 1));
+        zoomScale *= currentScale;
+      } else if (effect.mediaFile.effectType === 'zoom-out') {
+        // Zoom out: scala dal valore iniziale a 1.0
+        const startScale = 1 + (effectIntensity / 100) * 2; // Da 1.0 a 3.0
+        const currentScale = startScale - (progress * (startScale - 1));
+        zoomScale *= currentScale;
+      }
+    });
+
+    return Math.max(0.1, Math.min(5.0, zoomScale)); // Limita tra 0.1x e 5.0x
+  }, [timelineItems]);
+
   // OTTIMIZZAZIONE: Preload intelligente dei media
   const preloadMedia = useCallback(async () => {
     if (cancelledRef.current) return;
@@ -331,9 +363,10 @@ export const ExportDialog = ({
 
     if (activeItems.length === 0) return;
 
-    // NUOVO: Calcola l'alfa globale e verifica Black & White
+    // NUOVO: Calcola l'alfa globale, Black & White e Zoom
     const globalAlpha = calculateGlobalAlpha(time);
     const blackWhiteActive = isBlackWhiteActive(time);
+    const zoomScale = calculateZoomScale(time);
     
     // AGGIORNATO: Applica gli effetti prima di renderizzare i media
     ctx.save();
@@ -344,6 +377,17 @@ export const ExportDialog = ({
       ctx.filter = 'grayscale(1)';
     } else {
       ctx.filter = 'none';
+    }
+
+    // NUOVO: Applica la trasformazione di zoom se attiva
+    if (zoomScale !== 1.0) {
+      // Scala dal centro del canvas
+      const centerX = canvas.width / 2;
+      const centerY = canvas.height / 2;
+      
+      ctx.translate(centerX, centerY);
+      ctx.scale(zoomScale, zoomScale);
+      ctx.translate(-centerX, -centerY);
     }
 
     // OTTIMIZZAZIONE: Batch rendering per tipo di media
@@ -455,7 +499,7 @@ export const ExportDialog = ({
     if (frameTime > 33) { // Se impiega più di 33ms (30fps)
       perf.droppedFrames++;
     }
-  }, [timelineItems, calculateGlobalAlpha, isBlackWhiteActive]);
+  }, [timelineItems, calculateGlobalAlpha, isBlackWhiteActive, calculateZoomScale]);
 
   // OTTIMIZZAZIONE: Sync audio migliorato
   const syncAudio = useCallback((time: number, audioNodes: any[]) => {

@@ -2,7 +2,8 @@ import { useState, useCallback } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { TrendingUp, TrendingDown, Sparkles, X, Info, Filter } from "lucide-react";
+import { Slider } from "@/components/ui/slider";
+import { TrendingUp, TrendingDown, Sparkles, X, Info, Filter, ZoomIn, ZoomOut } from "lucide-react";
 import { TimelineItem } from "./VideoEditor";
 
 interface Effect {
@@ -13,6 +14,9 @@ interface Effect {
   category: 'transition' | 'visual' | 'audio';
   duration: number; // Durata predefinita in secondi
   previewHint: string; // Suggerimento per l'anteprima
+  hasIntensityControl?: boolean; // Se l'effetto ha controllo intensità
+  defaultIntensity?: number; // Intensità di default (0-100)
+  intensityLabel?: string; // Label per lo slider
 }
 
 interface EffectsDialogProps {
@@ -20,7 +24,7 @@ interface EffectsDialogProps {
   onClose: () => void;
   timelineItems: TimelineItem[];
   selectedItemId?: string;
-  onApplyEffect: (effectId: string, itemId?: string) => void;
+  onApplyEffect: (effectId: string, itemId?: string, intensity?: number) => void;
 }
 
 const AVAILABLE_EFFECTS: Effect[] = [
@@ -50,6 +54,30 @@ const AVAILABLE_EFFECTS: Effect[] = [
     category: 'visual',
     duration: 3,
     previewHint: 'Removes all color information, creating a classic black and white look'
+  },
+  {
+    id: 'zoom-in',
+    name: 'Zoom In',
+    description: 'Gradually zoom into the content with customizable intensity',
+    icon: ZoomIn,
+    category: 'visual',
+    duration: 3,
+    previewHint: 'Smoothly scales up the content from normal to zoomed view',
+    hasIntensityControl: true,
+    defaultIntensity: 50, // 50% = 1.5x zoom
+    intensityLabel: 'Zoom Level'
+  },
+  {
+    id: 'zoom-out',
+    name: 'Zoom Out',
+    description: 'Gradually zoom out from the content with customizable intensity',
+    icon: ZoomOut,
+    category: 'visual',
+    duration: 3,
+    previewHint: 'Smoothly scales down the content from zoomed to normal view',
+    hasIntensityControl: true,
+    defaultIntensity: 50, // 50% = start from 1.5x zoom
+    intensityLabel: 'Zoom Level'
   }
 ];
 
@@ -62,6 +90,7 @@ export const EffectsDialog = ({
 }: EffectsDialogProps) => {
   const [selectedEffect, setSelectedEffect] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [effectIntensity, setEffectIntensity] = useState<number>(50); // Intensità dell'effetto (0-100)
 
   const filteredEffects = AVAILABLE_EFFECTS.filter(effect =>
     selectedCategory === 'all' || effect.category === selectedCategory
@@ -70,24 +99,32 @@ export const EffectsDialog = ({
   const categories = [
     { id: 'all', name: 'All Effects', icon: Sparkles },
     { id: 'transition', name: 'Transitions', icon: TrendingUp },
-    { id: 'visual', name: 'Visual', icon: Filter }, // Cambiato icona per categoria visual
+    { id: 'visual', name: 'Visual', icon: Filter },
     { id: 'audio', name: 'Audio', icon: TrendingDown }
   ];
 
   const handleEffectSelect = useCallback((effectId: string) => {
     setSelectedEffect(effectId);
+    // Imposta l'intensità di default quando si seleziona un effetto
+    const effect = AVAILABLE_EFFECTS.find(e => e.id === effectId);
+    if (effect && effect.hasIntensityControl) {
+      setEffectIntensity(effect.defaultIntensity || 50);
+    }
   }, []);
 
   const handleApplyEffect = useCallback(() => {
     if (selectedEffect) {
-      onApplyEffect(selectedEffect, selectedItemId);
+      const effect = AVAILABLE_EFFECTS.find(e => e.id === selectedEffect);
+      const intensity = effect?.hasIntensityControl ? effectIntensity : undefined;
+      onApplyEffect(selectedEffect, selectedItemId, intensity);
       setSelectedEffect(null);
       onClose();
     }
-  }, [selectedEffect, selectedItemId, onApplyEffect, onClose]);
+  }, [selectedEffect, selectedItemId, effectIntensity, onApplyEffect, onClose]);
 
   const handleClose = useCallback(() => {
     setSelectedEffect(null);
+    setEffectIntensity(50);
     onClose();
   }, [onClose]);
 
@@ -99,9 +136,21 @@ export const EffectsDialog = ({
         return `opacity: 100% → 0 (${effect.duration}s)`;
       case 'black-white':
         return `color → grayscale (${effect.duration}s)`;
+      case 'zoom-in':
+        return `scale: 1.0 → ${(1 + effectIntensity / 100).toFixed(1)}x (${effect.duration}s)`;
+      case 'zoom-out':
+        return `scale: ${(1 + effectIntensity / 100).toFixed(1)}x → 1.0 (${effect.duration}s)`;
       default:
         return `${effect.description} (${effect.duration}s)`;
     }
+  };
+
+  // Funzione per calcolare il valore di zoom basato sull'intensità
+  const getZoomValue = (intensity: number) => {
+    // Intensità 0 = 1.0x (nessun zoom)
+    // Intensità 50 = 1.5x zoom  
+    // Intensità 100 = 3.0x zoom (zoom massimo)
+    return 1 + (intensity / 100) * 2; // Da 1.0 a 3.0
   };
 
   const selectedEffectData = selectedEffect ? AVAILABLE_EFFECTS.find(e => e.id === selectedEffect) : null;
@@ -199,6 +248,13 @@ export const EffectsDialog = ({
                           {effect.duration}s
                         </span>
 
+                        {/* Intensity Control Indicator */}
+                        {effect.hasIntensityControl && (
+                          <div className="absolute top-2 left-2 w-3 h-3 bg-blue-500 rounded-full flex items-center justify-center">
+                            <div className="w-1 h-1 bg-white rounded-full" />
+                          </div>
+                        )}
+
                         {/* Selected Indicator */}
                         {isSelected && (
                           <div className="absolute top-2 right-2 w-5 h-5 bg-primary rounded-full flex items-center justify-center">
@@ -248,6 +304,47 @@ export const EffectsDialog = ({
                     <p className="text-xs font-medium text-muted-foreground mb-1">Category</p>
                     <p className="text-sm capitalize">{selectedEffectData.category}</p>
                   </div>
+
+                  {/* NUOVO: Controllo Intensità per effetti Zoom */}
+                  {selectedEffectData.hasIntensityControl && (
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground mb-2">
+                        {selectedEffectData.intensityLabel || 'Intensity'}
+                      </p>
+                      <div className="space-y-2">
+                        <Slider
+                          value={[effectIntensity]}
+                          onValueChange={(value) => setEffectIntensity(value[0])}
+                          max={100}
+                          min={0}
+                          step={1}
+                          className="w-full"
+                        />
+                        <div className="flex justify-between text-xs text-muted-foreground">
+                          <span>
+                            {selectedEffectData.id === 'zoom-in' ? '1.0x' : 
+                             selectedEffectData.id === 'zoom-out' ? `${getZoomValue(effectIntensity).toFixed(1)}x` : '0%'}
+                          </span>
+                          <span className="font-medium">
+                            {selectedEffectData.id === 'zoom-in' || selectedEffectData.id === 'zoom-out' 
+                              ? `${getZoomValue(effectIntensity).toFixed(1)}x` 
+                              : `${effectIntensity}%`}
+                          </span>
+                          <span>
+                            {selectedEffectData.id === 'zoom-in' ? `${getZoomValue(effectIntensity).toFixed(1)}x` : 
+                             selectedEffectData.id === 'zoom-out' ? '1.0x' : '100%'}
+                          </span>
+                        </div>
+                        {(selectedEffectData.id === 'zoom-in' || selectedEffectData.id === 'zoom-out') && (
+                          <p className="text-[10px] text-muted-foreground mt-1">
+                            {selectedEffectData.id === 'zoom-in' 
+                              ? `Zooms from normal size to ${getZoomValue(effectIntensity).toFixed(1)}x magnification`
+                              : `Zooms from ${getZoomValue(effectIntensity).toFixed(1)}x magnification to normal size`}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   
                   <div>
                     <p className="text-xs font-medium text-muted-foreground mb-1">Description</p>
@@ -267,6 +364,12 @@ export const EffectsDialog = ({
                     <div className="w-4 h-4 bg-red-600 rounded border"></div>
                     <span className="text-xs text-muted-foreground">Effects appear in red</span>
                   </div>
+                  {selectedEffectData.hasIntensityControl && (
+                    <div className="flex items-center gap-2 mt-1">
+                      <div className="w-4 h-4 bg-blue-500 rounded-full border"></div>
+                      <span className="text-xs text-muted-foreground">Customizable intensity</span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -281,6 +384,13 @@ export const EffectsDialog = ({
                 Selected: <span className="font-medium">
                   {AVAILABLE_EFFECTS.find(e => e.id === selectedEffect)?.name}
                 </span>
+                {selectedEffectData?.hasIntensityControl && (
+                  <span className="ml-2 text-xs">
+                    ({selectedEffectData.id === 'zoom-in' || selectedEffectData.id === 'zoom-out' 
+                      ? `${getZoomValue(effectIntensity).toFixed(1)}x zoom` 
+                      : `${effectIntensity}% intensity`})
+                  </span>
+                )}
                 {selectedItemId ? (
                   <span className="ml-2 text-xs">(will be applied to selected item)</span>
                 ) : (

@@ -16,6 +16,7 @@ export interface MediaFile {
   duration: number;
   file?: File; // Opzionale per gli effetti
   effectType?: string; // Per identificare il tipo di effetto
+  effectIntensity?: number; // Intensità dell'effetto (0-100) per zoom, ecc.
 }
 
 export interface TimelineItem {
@@ -170,8 +171,8 @@ export const VideoEditor = () => {
     setIsEffectsDialogOpen(true);
   };
 
-  // AGGIORNATO: Funzione per applicare effetti con durate dinamiche
-  const handleApplyEffect = (effectId: string, itemId?: string) => {
+  // AGGIORNATO: Funzione per applicare effetti con durate dinamiche e intensità
+  const handleApplyEffect = (effectId: string, itemId?: string, intensity?: number) => {
     // Trova la prima track video disponibile
     const firstVideoTrack = tracks.find(track => track.type === 'video');
     if (!firstVideoTrack) {
@@ -183,11 +184,13 @@ export const VideoEditor = () => {
       return;
     }
 
-    // NUOVO: Definisci le durate predefinite per ogni effetto
+    // AGGIORNATO: Definisci le durate predefinite per ogni effetto
     const effectDurations: { [key: string]: number } = {
       'fade-in': 2,
       'fade-out': 2,
-      'black-white': 3
+      'black-white': 3,
+      'zoom-in': 3,
+      'zoom-out': 3
     };
 
     // Crea un nuovo MediaFile per l'effetto
@@ -204,7 +207,8 @@ export const VideoEditor = () => {
       type: 'effect',
       url: '', // Gli effetti non hanno URL
       duration: effectDuration, // AGGIORNATO: Usa durata dinamica
-      effectType: effectId
+      effectType: effectId,
+      effectIntensity: intensity // NUOVO: Salva l'intensità dell'effetto
     };
 
     // Aggiungi l'effetto anche alla lista dei media files per coerenza
@@ -236,9 +240,11 @@ export const VideoEditor = () => {
     setTimelineItems(newItems);
     saveToHistory(newItems);
 
+    // AGGIORNATO: Messaggio con intensità per effetti zoom
+    const intensityText = intensity !== undefined ? ` (${intensity}% intensity)` : '';
     toast({
       title: "Effect Applied",
-      description: `${effectName} has been added to the timeline at ${targetStartTime.toFixed(1)}s.`,
+      description: `${effectName}${intensityText} has been added to the timeline at ${targetStartTime.toFixed(1)}s.`,
     });
 
     // Chiudi il dialog degli effetti

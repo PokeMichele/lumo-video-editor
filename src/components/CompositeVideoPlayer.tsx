@@ -67,7 +67,7 @@ export const CompositeVideoPlayer = ({
     ).sort((a, b) => a.track - b.track);
   }, [timelineItems, currentTime]);
 
-  // AGGIORNATO: Funzione per calcolare tutti gli effetti attivi
+  // AGGIORNATO: Funzione per calcolare tutti gli effetti attivi con supporto zoom
   const calculateActiveEffects = useCallback((time: number): ActiveEffect[] => {
     const activeEffects = timelineItems.filter(item =>
       item.mediaFile.type === 'effect' &&
@@ -91,6 +91,18 @@ export const CompositeVideoPlayer = ({
         case 'black-white':
           // Per il black & white, l'intensità è sempre 1 (completamente attivo)
           intensity = 1;
+          break;
+        case 'zoom-in':
+          // Zoom in: scala da 1.0 al valore finale basato sull'intensità dell'effetto
+          const zoomInIntensity = effect.mediaFile.effectIntensity || 50;
+          const maxScale = 1 + (zoomInIntensity / 100) * 2; // Da 1.0 a 3.0
+          intensity = 1 + (progress * (maxScale - 1)); // Progressivo da 1 a maxScale
+          break;
+        case 'zoom-out':
+          // Zoom out: scala dal valore iniziale a 1.0
+          const zoomOutIntensity = effect.mediaFile.effectIntensity || 50;
+          const startScale = 1 + (zoomOutIntensity / 100) * 2; // Da 1.0 a 3.0
+          intensity = startScale - (progress * (startScale - 1)); // Progressivo da startScale a 1
           break;
         default:
           intensity = 1;
@@ -124,7 +136,21 @@ export const CompositeVideoPlayer = ({
     return activeEffects.some(effect => effect.type === 'black-white');
   }, []);
 
-  // AGGIORNATO: Funzione per renderizzare indicatori degli effetti
+  // NUOVO: Funzione per calcolare il fattore di scala complessivo per effetti zoom
+  const calculateZoomScale = useCallback((activeEffects: ActiveEffect[]) => {
+    let zoomScale = 1.0;
+
+    activeEffects.forEach(effect => {
+      if (effect.type === 'zoom-in' || effect.type === 'zoom-out') {
+        // Per gli effetti zoom, l'intensity contiene già il valore di scala calcolato
+        zoomScale *= effect.intensity;
+      }
+    });
+
+    return Math.max(0.1, Math.min(5.0, zoomScale)); // Limita tra 0.1x e 5.0x
+  }, []);
+
+  // AGGIORNATO: Funzione per renderizzare indicatori degli effetti con supporto zoom
   const renderEffectIndicators = useCallback((ctx: CanvasRenderingContext2D, canvasWidth: number, canvasHeight: number, activeEffects: ActiveEffect[]) => {
     if (activeEffects.length === 0) return;
 
@@ -146,14 +172,23 @@ export const CompositeVideoPlayer = ({
       let bgColor = 'rgba(255, 0, 0, 0.9)'; // Default rosso
       if (effect.type === 'black-white') {
         bgColor = 'rgba(128, 128, 128, 0.9)'; // Grigio per black & white
+      } else if (effect.type === 'zoom-in' || effect.type === 'zoom-out') {
+        bgColor = 'rgba(0, 123, 255, 0.9)'; // Blu per zoom
       }
       
       ctx.fillStyle = bgColor;
-      ctx.fillRect(10, textY - 15, 150, 20);
+      ctx.fillRect(10, textY - 15, 180, 20);
       ctx.fillStyle = '#ffffff';
       ctx.font = '12px Arial';
       ctx.textAlign = 'left';
-      ctx.fillText(`${effect.name} (${(effect.progress * 100).toFixed(0)}%)`, 15, textY);
+      
+      // Testo specifico per tipo di effetto
+      let displayText = `${effect.name} (${(effect.progress * 100).toFixed(0)}%)`;
+      if (effect.type === 'zoom-in' || effect.type === 'zoom-out') {
+        displayText = `${effect.name} (${effect.intensity.toFixed(2)}x)`;
+      }
+      
+      ctx.fillText(displayText, 15, textY);
     });
 
     ctx.restore();
@@ -197,6 +232,7 @@ export const CompositeVideoPlayer = ({
     const activeEffects = calculateActiveEffects(currentTime);
     const globalAlpha = calculateGlobalAlpha(activeEffects);
     const blackWhiteActive = isBlackWhiteActive(activeEffects);
+    const zoomScale = calculateZoomScale(activeEffects);
     
     // Separa gli elementi media dagli effetti
     const mediaItems = activeItems.filter(item => item.mediaFile.type !== 'effect');
@@ -212,6 +248,17 @@ export const CompositeVideoPlayer = ({
       ctx.filter = 'grayscale(1)';
     } else {
       ctx.filter = 'none';
+    }
+
+    // NUOVO: Applica la trasformazione di zoom se attiva
+    if (zoomScale !== 1.0) {
+      // Scala dal centro del canvas
+      const centerX = canvas.width / 2;
+      const centerY = canvas.height / 2;
+      
+      ctx.translate(centerX, centerY);
+      ctx.scale(zoomScale, zoomScale);
+      ctx.translate(-centerX, -centerY);
     }
 
     // Renderizza tutti gli elementi media con gli effetti applicati
@@ -314,7 +361,7 @@ export const CompositeVideoPlayer = ({
 
     // Renderizza gli indicatori degli effetti sopra tutto (solo per preview)
     renderEffectIndicators(ctx, canvas.width, canvas.height, activeEffects);
-  }, [activeItems, currentTime, canvasDimensions, calculateActiveEffects, calculateGlobalAlpha, isBlackWhiteActive, renderEffectIndicators]);
+  }, [activeItems, currentTime, canvasDimensions, calculateActiveEffects, calculateGlobalAlpha, isBlackWhiteActive, calculateZoomScale, renderEffectIndicators]);
 
   // AGGIORNATO: Gestione elementi media migliorata - ora gestisce anche gli effetti
   useEffect(() => {
