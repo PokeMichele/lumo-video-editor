@@ -71,7 +71,7 @@ export const ExportDialog = ({
     }
   }, [aspectRatio]);
 
-  // AGGIORNATO: Funzione per calcolare l'alfa globale basato sugli effetti (per export)
+  // Funzione per calcolare l'alfa globale basato sugli effetti (per export)
   const calculateGlobalAlpha = useCallback((time: number) => {
     const activeEffects = timelineItems.filter(item =>
       item.mediaFile.type === 'effect' &&
@@ -103,7 +103,7 @@ export const ExportDialog = ({
     return Math.max(0, Math.min(1, globalAlpha));
   }, [timelineItems]);
 
-  // NUOVO: Funzione per verificare se è attivo l'effetto black & white (per export)
+  // Funzione per verificare se è attivo l'effetto black & white (per export)
   const isBlackWhiteActive = useCallback((time: number) => {
     return timelineItems.some(item =>
       item.mediaFile.type === 'effect' &&
@@ -113,7 +113,31 @@ export const ExportDialog = ({
     );
   }, [timelineItems]);
 
-  // AGGIORNATO: Funzione per calcolare il fattore di scala per effetti zoom (per export)
+  // NUOVO: Funzione per calcolare l'intensità del blur (per export)
+  const calculateBlurIntensity = useCallback((time: number) => {
+    const activeBlurEffects = timelineItems.filter(item =>
+      item.mediaFile.type === 'effect' &&
+      item.mediaFile.effectType === 'blur' &&
+      time >= item.startTime &&
+      time < item.startTime + item.duration
+    );
+
+    let blurIntensity = 0;
+
+    activeBlurEffects.forEach(effect => {
+      const relativeTime = time - effect.startTime;
+      const progress = relativeTime / effect.duration; // 0 a 1
+      const effectIntensity = effect.mediaFile.effectIntensity || 50;
+
+      // Il blur aumenta progressivamente fino al valore massimo
+      const currentBlur = (effectIntensity / 100) * 10; // 0% = 0px, 100% = 10px
+      blurIntensity = Math.max(blurIntensity, currentBlur);
+    });
+
+    return Math.max(0, Math.min(10, blurIntensity)); // Limita tra 0px e 10px
+  }, [timelineItems]);
+
+  // CORRETTO: Funzione per calcolare il fattore di scala per effetti zoom (per export)
   const calculateZoomScale = useCallback((time: number) => {
     const activeZoomEffects = timelineItems.filter(item =>
       item.mediaFile.type === 'effect' &&
@@ -129,16 +153,15 @@ export const ExportDialog = ({
       const progress = relativeTime / effect.duration; // 0 a 1
       const effectIntensity = effect.mediaFile.effectIntensity || 50;
 
-      // Converte la percentuale (0-100) in fattore di scala (1.0-3.0)
-      const maxZoomFactor = 1 + (effectIntensity / 100) * 2; // 0% = 1.0x, 100% = 3.0x
-
       if (effect.mediaFile.effectType === 'zoom-in') {
         // Zoom in: scala progressivamente da 1.0 al valore finale
+        const maxZoomFactor = 1 + (effectIntensity / 100) * 2; // 0% = 1.0x, 100% = 3.0x
         const currentScale = 1 + (progress * (maxZoomFactor - 1));
         zoomScale *= currentScale;
       } else if (effect.mediaFile.effectType === 'zoom-out') {
-        // Zoom out: scala progressivamente dal valore iniziale a 1.0
-        const currentScale = maxZoomFactor - (progress * (maxZoomFactor - 1));
+        // CORRETTO: Zoom out parte da 1.0 e va verso valori più piccoli
+        const minZoomFactor = 1 - (effectIntensity / 100) * 0.8; // 0% = 1.0x, 100% = 0.2x
+        const currentScale = 1 - (progress * (1 - minZoomFactor));
         zoomScale *= currentScale;
       }
     });
@@ -344,7 +367,7 @@ export const ExportDialog = ({
     }
   }, [timelineItems]);
 
-  // AGGIORNATO: Render frame migliorato con supporto completo per tutti gli effetti
+  // AGGIORNATO: Render frame migliorato con supporto completo per tutti gli effetti incluso Blur
   const renderFrame = useCallback(async (time: number, ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement) => {
     if (cancelledRef.current) return;
 
@@ -364,23 +387,35 @@ export const ExportDialog = ({
 
     if (activeItems.length === 0) return;
 
-    // NUOVO: Calcola l'alfa globale, Black & White e Zoom
+    // AGGIORNATO: Calcola tutti gli effetti attivi
     const globalAlpha = calculateGlobalAlpha(time);
     const blackWhiteActive = isBlackWhiteActive(time);
     const zoomScale = calculateZoomScale(time);
+    const blurIntensity = calculateBlurIntensity(time); // NUOVO
     
     // AGGIORNATO: Applica gli effetti prima di renderizzare i media
     ctx.save();
     ctx.globalAlpha = globalAlpha;
     
-    // NUOVO: Applica il filtro black & white se attivo
+    // AGGIORNATO: Combina tutti i filtri CSS
+    let filterString = 'none';
+    const filters = [];
+    
     if (blackWhiteActive) {
-      ctx.filter = 'grayscale(1)';
-    } else {
-      ctx.filter = 'none';
+      filters.push('grayscale(1)');
     }
+    
+    if (blurIntensity > 0) {
+      filters.push(`blur(${blurIntensity}px)`);
+    }
+    
+    if (filters.length > 0) {
+      filterString = filters.join(' ');
+    }
+    
+    ctx.filter = filterString;
 
-    // NUOVO: Applica la trasformazione di zoom se attiva
+    // Applica la trasformazione di zoom se attiva
     if (zoomScale !== 1.0) {
       // Scala dal centro del canvas
       const centerX = canvas.width / 2;
@@ -500,7 +535,7 @@ export const ExportDialog = ({
     if (frameTime > 33) { // Se impiega più di 33ms (30fps)
       perf.droppedFrames++;
     }
-  }, [timelineItems, calculateGlobalAlpha, isBlackWhiteActive, calculateZoomScale]);
+  }, [timelineItems, calculateGlobalAlpha, isBlackWhiteActive, calculateZoomScale, calculateBlurIntensity]);
 
   // OTTIMIZZAZIONE: Sync audio migliorato
   const syncAudio = useCallback((time: number, audioNodes: any[]) => {
@@ -616,7 +651,7 @@ export const ExportDialog = ({
     };
   }, [exportedVideoUrl]);
 
-  // RISOLTO: Processo di export con stop corretto
+  // Processo di export con stop corretto
   const exportVideo = useCallback(async () => {
     try {
       if (cancelledRef.current || renderingRef.current) return;
@@ -720,7 +755,7 @@ export const ExportDialog = ({
 
       mediaRecorder.start();
 
-      // RISOLTO: Rendering loop con stop definitivo
+      // Rendering loop con stop definitivo
       const totalFrames = Math.ceil(exportDuration * targetFPS);
       const frameInterval = 1000 / targetFPS;
       let currentFrame = 0;

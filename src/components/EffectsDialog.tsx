@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Slider } from "@/components/ui/slider";
-import { TrendingUp, TrendingDown, Sparkles, X, Info, Filter, ZoomIn, ZoomOut } from "lucide-react";
+import { TrendingUp, TrendingDown, Sparkles, X, Info, Filter, ZoomIn, ZoomOut, Circle } from "lucide-react";
 import { TimelineItem } from "./VideoEditor";
 
 interface Effect {
@@ -70,14 +70,26 @@ const AVAILABLE_EFFECTS: Effect[] = [
   {
     id: 'zoom-out',
     name: 'Zoom Out',
-    description: 'Gradually zoom out from the content with customizable intensity',
+    description: 'Gradually zoom out from normal size with customizable intensity',
     icon: ZoomOut,
     category: 'visual',
     duration: 3,
-    previewHint: 'Smoothly scales down the content from zoomed to normal view',
+    previewHint: 'Smoothly scales down the content from normal to smaller view',
     hasIntensityControl: true,
-    defaultIntensity: 50, // 50% = start from 1.5x zoom
+    defaultIntensity: 50, // 50% = 0.5x zoom (rimpicciolisce)
     intensityLabel: 'Zoom Level'
+  },
+  {
+    id: 'blur',
+    name: 'Blur',
+    description: 'Apply customizable blur effect to content',
+    icon: Circle,
+    category: 'visual',
+    duration: 3,
+    previewHint: 'Creates a soft, unfocused look with adjustable intensity',
+    hasIntensityControl: true,
+    defaultIntensity: 50, // 50% blur
+    intensityLabel: 'Blur Intensity'
   }
 ];
 
@@ -137,9 +149,11 @@ export const EffectsDialog = ({
       case 'black-white':
         return `color → grayscale (${effect.duration}s)`;
       case 'zoom-in':
-        return `zoom: 0% → ${effectIntensity}% (${effect.duration}s)`;
+        return `zoom: 100% → ${100 + effectIntensity}% (${effect.duration}s)`;
       case 'zoom-out':
-        return `zoom: ${effectIntensity}% → 0% (${effect.duration}s)`;
+        return `zoom: 100% → ${100 - effectIntensity}% (${effect.duration}s)`;
+      case 'blur':
+        return `blur: 0% → ${effectIntensity}% (${effect.duration}s)`;
       default:
         return `${effect.description} (${effect.duration}s)`;
     }
@@ -240,7 +254,7 @@ export const EffectsDialog = ({
                           {effect.duration}s
                         </span>
 
-                        {/* CORRETTO: Intensity Control Indicator - ora rosso */}
+                        {/* Intensity Control Indicator - rosso */}
                         {effect.hasIntensityControl && (
                           <div className="absolute top-2 left-2 w-3 h-3 bg-red-500 rounded-full flex items-center justify-center">
                             <div className="w-1 h-1 bg-white rounded-full" />
@@ -297,7 +311,7 @@ export const EffectsDialog = ({
                     <p className="text-sm capitalize">{selectedEffectData.category}</p>
                   </div>
 
-                  {/* Controllo Intensità per effetti Zoom */}
+                  {/* Controllo Intensità per effetti con controlli personalizzabili */}
                   {selectedEffectData.hasIntensityControl && (
                     <div>
                       <p className="text-xs font-medium text-muted-foreground mb-2">
@@ -317,11 +331,19 @@ export const EffectsDialog = ({
                           <span className="font-medium">{effectIntensity}%</span>
                           <span>100%</span>
                         </div>
-                        {(selectedEffectData.id === 'zoom-in' || selectedEffectData.id === 'zoom-out') && (
+                        {selectedEffectData.id === 'zoom-in' && (
                           <p className="text-[10px] text-muted-foreground mt-1">
-                            {selectedEffectData.id === 'zoom-in' 
-                              ? `Zooms from normal size to ${effectIntensity}% magnification`
-                              : `Zooms from ${effectIntensity}% magnification to normal size`}
+                            Zooms from normal size to {100 + effectIntensity}% magnification
+                          </p>
+                        )}
+                        {selectedEffectData.id === 'zoom-out' && (
+                          <p className="text-[10px] text-muted-foreground mt-1">
+                            Zooms from normal size to {100 - effectIntensity}% reduction
+                          </p>
+                        )}
+                        {selectedEffectData.id === 'blur' && (
+                          <p className="text-[10px] text-muted-foreground mt-1">
+                            Applies {effectIntensity}% blur intensity to the content
                           </p>
                         )}
                       </div>

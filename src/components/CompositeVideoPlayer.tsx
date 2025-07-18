@@ -67,7 +67,7 @@ export const CompositeVideoPlayer = ({
     ).sort((a, b) => a.track - b.track);
   }, [timelineItems, currentTime]);
 
-  // AGGIORNATO: Funzione per calcolare tutti gli effetti attivi - semplificata per zoom
+  // AGGIORNATO: Funzione per calcolare tutti gli effetti attivi
   const calculateActiveEffects = useCallback((time: number): ActiveEffect[] => {
     const activeEffects = timelineItems.filter(item =>
       item.mediaFile.type === 'effect' &&
@@ -93,7 +93,8 @@ export const CompositeVideoPlayer = ({
           break;
         case 'zoom-in':
         case 'zoom-out':
-          intensity = 1; // Per zoom usiamo sempre intensità 1, il valore zoom è calcolato separatamente
+        case 'blur':
+          intensity = 1; // Per zoom e blur usiamo sempre intensità 1, il valore è calcolato separatamente
           break;
         default:
           intensity = 1;
@@ -109,7 +110,7 @@ export const CompositeVideoPlayer = ({
     });
   }, [timelineItems]);
 
-  // AGGIORNATO: Funzione per calcolare l'alfa globale (solo per effetti di fade)
+  // Funzione per calcolare l'alfa globale (solo per effetti di fade)
   const calculateGlobalAlpha = useCallback((activeEffects: ActiveEffect[]) => {
     let globalAlpha = 1.0;
 
@@ -122,12 +123,37 @@ export const CompositeVideoPlayer = ({
     return Math.max(0, Math.min(1, globalAlpha));
   }, []);
 
-  // NUOVO: Funzione per verificare se è attivo l'effetto black & white
+  // Funzione per verificare se è attivo l'effetto black & white
   const isBlackWhiteActive = useCallback((activeEffects: ActiveEffect[]) => {
     return activeEffects.some(effect => effect.type === 'black-white');
   }, []);
 
-  // AGGIORNATO: Funzione per calcolare il fattore di scala complessivo per effetti zoom
+  // NUOVO: Funzione per calcolare l'intensità del blur attivo
+  const calculateBlurIntensity = useCallback((time: number) => {
+    const activeBlurEffects = timelineItems.filter(item =>
+      item.mediaFile.type === 'effect' &&
+      item.mediaFile.effectType === 'blur' &&
+      time >= item.startTime &&
+      time < item.startTime + item.duration
+    );
+
+    let blurIntensity = 0;
+
+    activeBlurEffects.forEach(effect => {
+      const relativeTime = time - effect.startTime;
+      const progress = relativeTime / effect.duration; // 0 a 1
+      const effectIntensity = effect.mediaFile.effectIntensity || 50;
+
+      // Il blur aumenta progressivamente fino al valore massimo e rimane costante
+      // Durante tutto l'effetto
+      const currentBlur = (effectIntensity / 100) * 10; // 0% = 0px, 100% = 10px
+      blurIntensity = Math.max(blurIntensity, currentBlur);
+    });
+
+    return Math.max(0, Math.min(10, blurIntensity)); // Limita tra 0px e 10px
+  }, [timelineItems]);
+
+  // CORRETTO: Funzione per calcolare il fattore di scala per effetti zoom
   const calculateZoomScale = useCallback((time: number) => {
     const activeZoomEffects = timelineItems.filter(item =>
       item.mediaFile.type === 'effect' &&
@@ -143,16 +169,15 @@ export const CompositeVideoPlayer = ({
       const progress = relativeTime / effect.duration; // 0 a 1
       const effectIntensity = effect.mediaFile.effectIntensity || 50;
 
-      // Converte la percentuale (0-100) in fattore di scala (1.0-3.0)
-      const maxZoomFactor = 1 + (effectIntensity / 100) * 2; // 0% = 1.0x, 100% = 3.0x
-
       if (effect.mediaFile.effectType === 'zoom-in') {
         // Zoom in: scala progressivamente da 1.0 al valore finale
+        const maxZoomFactor = 1 + (effectIntensity / 100) * 2; // 0% = 1.0x, 100% = 3.0x
         const currentScale = 1 + (progress * (maxZoomFactor - 1));
         zoomScale *= currentScale;
       } else if (effect.mediaFile.effectType === 'zoom-out') {
-        // Zoom out: scala progressivamente dal valore iniziale a 1.0
-        const currentScale = maxZoomFactor - (progress * (maxZoomFactor - 1));
+        // CORRETTO: Zoom out parte da 1.0 e va verso valori più piccoli
+        const minZoomFactor = 1 - (effectIntensity / 100) * 0.8; // 0% = 1.0x, 100% = 0.2x
+        const currentScale = 1 - (progress * (1 - minZoomFactor));
         zoomScale *= currentScale;
       }
     });
@@ -160,7 +185,7 @@ export const CompositeVideoPlayer = ({
     return Math.max(0.1, Math.min(5.0, zoomScale)); // Limita tra 0.1x e 5.0x
   }, [timelineItems]);
 
-  // AGGIORNATO: Funzione per renderizzare indicatori degli effetti con supporto zoom corretto
+  // AGGIORNATO: Funzione per renderizzare indicatori degli effetti con supporto per tutti gli effetti
   const renderEffectIndicators = useCallback((ctx: CanvasRenderingContext2D, canvasWidth: number, canvasHeight: number, activeEffects: ActiveEffect[], currentTime: number) => {
     if (activeEffects.length === 0) return;
 
@@ -184,6 +209,8 @@ export const CompositeVideoPlayer = ({
         bgColor = 'rgba(128, 128, 128, 0.9)'; // Grigio per black & white
       } else if (effect.type === 'zoom-in' || effect.type === 'zoom-out') {
         bgColor = 'rgba(0, 123, 255, 0.9)'; // Blu per zoom
+      } else if (effect.type === 'blur') {
+        bgColor = 'rgba(128, 0, 128, 0.9)'; // Viola per blur
       }
       
       ctx.fillStyle = bgColor;
@@ -195,16 +222,18 @@ export const CompositeVideoPlayer = ({
       // Testo specifico per tipo di effetto
       let displayText = `${effect.name} (${(effect.progress * 100).toFixed(0)}%)`;
       if (effect.type === 'zoom-in' || effect.type === 'zoom-out') {
-        // Per zoom, calcola il valore corrente basato sul tempo
         const currentZoom = calculateZoomScale(currentTime);
         displayText = `${effect.name} (${currentZoom.toFixed(2)}x)`;
+      } else if (effect.type === 'blur') {
+        const currentBlur = calculateBlurIntensity(currentTime);
+        displayText = `${effect.name} (${currentBlur.toFixed(1)}px)`;
       }
       
       ctx.fillText(displayText, 15, textY);
     });
 
     ctx.restore();
-  }, [calculateZoomScale]);
+  }, [calculateZoomScale, calculateBlurIntensity]);
 
   // OTTIMIZZAZIONE: Throttled render function
   const renderComposite = useCallback(() => {
@@ -244,7 +273,8 @@ export const CompositeVideoPlayer = ({
     const activeEffects = calculateActiveEffects(currentTime);
     const globalAlpha = calculateGlobalAlpha(activeEffects);
     const blackWhiteActive = isBlackWhiteActive(activeEffects);
-    const zoomScale = calculateZoomScale(currentTime); // AGGIORNATO: passa il tempo invece degli effetti
+    const zoomScale = calculateZoomScale(currentTime);
+    const blurIntensity = calculateBlurIntensity(currentTime); // NUOVO
     
     // Separa gli elementi media dagli effetti
     const mediaItems = activeItems.filter(item => item.mediaFile.type !== 'effect');
@@ -255,14 +285,25 @@ export const CompositeVideoPlayer = ({
     // Applica l'alfa globale per gli effetti di fade
     ctx.globalAlpha = globalAlpha;
     
-    // NUOVO: Applica il filtro black & white se attivo
+    // AGGIORNATO: Combina tutti i filtri CSS
+    let filterString = 'none';
+    const filters = [];
+    
     if (blackWhiteActive) {
-      ctx.filter = 'grayscale(1)';
-    } else {
-      ctx.filter = 'none';
+      filters.push('grayscale(1)');
     }
+    
+    if (blurIntensity > 0) {
+      filters.push(`blur(${blurIntensity}px)`);
+    }
+    
+    if (filters.length > 0) {
+      filterString = filters.join(' ');
+    }
+    
+    ctx.filter = filterString;
 
-    // NUOVO: Applica la trasformazione di zoom se attiva
+    // Applica la trasformazione di zoom se attiva
     if (zoomScale !== 1.0) {
       // Scala dal centro del canvas
       const centerX = canvas.width / 2;
@@ -373,7 +414,7 @@ export const CompositeVideoPlayer = ({
 
     // Renderizza gli indicatori degli effetti sopra tutto (solo per preview)
     renderEffectIndicators(ctx, canvas.width, canvas.height, activeEffects, currentTime);
-  }, [activeItems, currentTime, canvasDimensions, calculateActiveEffects, calculateGlobalAlpha, isBlackWhiteActive, calculateZoomScale, renderEffectIndicators]);
+  }, [activeItems, currentTime, canvasDimensions, calculateActiveEffects, calculateGlobalAlpha, isBlackWhiteActive, calculateZoomScale, calculateBlurIntensity, renderEffectIndicators]);
 
   // AGGIORNATO: Gestione elementi media migliorata - ora gestisce anche gli effetti
   useEffect(() => {
@@ -439,7 +480,7 @@ export const CompositeVideoPlayer = ({
         img.src = item.mediaFile.url;
         imageElementsRef.current.set(item.id, img);
       }
-      // NUOVO: Gli effetti non creano elementi media, vengono gestiti direttamente nel rendering
+      // Gli effetti non creano elementi media, vengono gestiti direttamente nel rendering
     });
   }, [timelineItems, volume]);
 
@@ -447,7 +488,7 @@ export const CompositeVideoPlayer = ({
   useEffect(() => {
     const syncTolerance = 0.1; // Ridotta la tolleranza per miglior precisione
     
-    // AGGIORNATO: Filtra solo gli elementi media attivi (escludendo gli effetti)
+    // Filtra solo gli elementi media attivi (escludendo gli effetti)
     const activeMediaItems = activeItems.filter(item => item.mediaFile.type !== 'effect');
     
     // Gestisci video
