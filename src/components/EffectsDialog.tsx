@@ -137,20 +137,12 @@ export const EffectsDialog = ({
       case 'black-white':
         return `color → grayscale (${effect.duration}s)`;
       case 'zoom-in':
-        return `scale: 1.0 → ${(1 + effectIntensity / 100).toFixed(1)}x (${effect.duration}s)`;
+        return `zoom: 0% → ${effectIntensity}% (${effect.duration}s)`;
       case 'zoom-out':
-        return `scale: ${(1 + effectIntensity / 100).toFixed(1)}x → 1.0 (${effect.duration}s)`;
+        return `zoom: ${effectIntensity}% → 0% (${effect.duration}s)`;
       default:
         return `${effect.description} (${effect.duration}s)`;
     }
-  };
-
-  // Funzione per calcolare il valore di zoom basato sull'intensità
-  const getZoomValue = (intensity: number) => {
-    // Intensità 0 = 1.0x (nessun zoom)
-    // Intensità 50 = 1.5x zoom  
-    // Intensità 100 = 3.0x zoom (zoom massimo)
-    return 1 + (intensity / 100) * 2; // Da 1.0 a 3.0
   };
 
   const selectedEffectData = selectedEffect ? AVAILABLE_EFFECTS.find(e => e.id === selectedEffect) : null;
@@ -321,25 +313,15 @@ export const EffectsDialog = ({
                           className="w-full"
                         />
                         <div className="flex justify-between text-xs text-muted-foreground">
-                          <span>
-                            {selectedEffectData.id === 'zoom-in' ? '1.0x' : 
-                             selectedEffectData.id === 'zoom-out' ? `${getZoomValue(effectIntensity).toFixed(1)}x` : '0%'}
-                          </span>
-                          <span className="font-medium">
-                            {selectedEffectData.id === 'zoom-in' || selectedEffectData.id === 'zoom-out' 
-                              ? `${getZoomValue(effectIntensity).toFixed(1)}x` 
-                              : `${effectIntensity}%`}
-                          </span>
-                          <span>
-                            {selectedEffectData.id === 'zoom-in' ? `${getZoomValue(effectIntensity).toFixed(1)}x` : 
-                             selectedEffectData.id === 'zoom-out' ? '1.0x' : '100%'}
-                          </span>
+                          <span>0%</span>
+                          <span className="font-medium">{effectIntensity}%</span>
+                          <span>100%</span>
                         </div>
                         {(selectedEffectData.id === 'zoom-in' || selectedEffectData.id === 'zoom-out') && (
                           <p className="text-[10px] text-muted-foreground mt-1">
                             {selectedEffectData.id === 'zoom-in' 
-                              ? `Zooms from normal size to ${getZoomValue(effectIntensity).toFixed(1)}x magnification`
-                              : `Zooms from ${getZoomValue(effectIntensity).toFixed(1)}x magnification to normal size`}
+                              ? `Zooms from normal size to ${effectIntensity}% magnification`
+                              : `Zooms from ${effectIntensity}% magnification to normal size`}
                           </p>
                         )}
                       </div>
@@ -386,9 +368,7 @@ export const EffectsDialog = ({
                 </span>
                 {selectedEffectData?.hasIntensityControl && (
                   <span className="ml-2 text-xs">
-                    ({selectedEffectData.id === 'zoom-in' || selectedEffectData.id === 'zoom-out' 
-                      ? `${getZoomValue(effectIntensity).toFixed(1)}x zoom` 
-                      : `${effectIntensity}% intensity`})
+                    ({effectIntensity}% intensity)
                   </span>
                 )}
                 {selectedItemId ? (

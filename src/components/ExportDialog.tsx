@@ -113,7 +113,7 @@ export const ExportDialog = ({
     );
   }, [timelineItems]);
 
-  // NUOVO: Funzione per calcolare il fattore di scala per effetti zoom (per export)
+  // AGGIORNATO: Funzione per calcolare il fattore di scala per effetti zoom (per export)
   const calculateZoomScale = useCallback((time: number) => {
     const activeZoomEffects = timelineItems.filter(item =>
       item.mediaFile.type === 'effect' &&
@@ -129,15 +129,16 @@ export const ExportDialog = ({
       const progress = relativeTime / effect.duration; // 0 a 1
       const effectIntensity = effect.mediaFile.effectIntensity || 50;
 
+      // Converte la percentuale (0-100) in fattore di scala (1.0-3.0)
+      const maxZoomFactor = 1 + (effectIntensity / 100) * 2; // 0% = 1.0x, 100% = 3.0x
+
       if (effect.mediaFile.effectType === 'zoom-in') {
-        // Zoom in: scala da 1.0 al valore finale
-        const maxScale = 1 + (effectIntensity / 100) * 2; // Da 1.0 a 3.0
-        const currentScale = 1 + (progress * (maxScale - 1));
+        // Zoom in: scala progressivamente da 1.0 al valore finale
+        const currentScale = 1 + (progress * (maxZoomFactor - 1));
         zoomScale *= currentScale;
       } else if (effect.mediaFile.effectType === 'zoom-out') {
-        // Zoom out: scala dal valore iniziale a 1.0
-        const startScale = 1 + (effectIntensity / 100) * 2; // Da 1.0 a 3.0
-        const currentScale = startScale - (progress * (startScale - 1));
+        // Zoom out: scala progressivamente dal valore iniziale a 1.0
+        const currentScale = maxZoomFactor - (progress * (maxZoomFactor - 1));
         zoomScale *= currentScale;
       }
     });

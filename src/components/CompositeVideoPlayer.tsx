@@ -67,7 +67,7 @@ export const CompositeVideoPlayer = ({
     ).sort((a, b) => a.track - b.track);
   }, [timelineItems, currentTime]);
 
-  // AGGIORNATO: Funzione per calcolare tutti gli effetti attivi con supporto zoom
+  // AGGIORNATO: Funzione per calcolare tutti gli effetti attivi - semplificata per zoom
   const calculateActiveEffects = useCallback((time: number): ActiveEffect[] => {
     const activeEffects = timelineItems.filter(item =>
       item.mediaFile.type === 'effect' &&
@@ -79,7 +79,7 @@ export const CompositeVideoPlayer = ({
       const relativeTime = time - effect.startTime;
       const progress = relativeTime / effect.duration; // 0 a 1
       
-      let intensity = 1; // Intensità di default
+      let intensity = 1; // Intensità di default per la maggior parte degli effetti
 
       switch (effect.mediaFile.effectType) {
         case 'fade-in':
@@ -89,20 +89,11 @@ export const CompositeVideoPlayer = ({
           intensity = Math.max(1 - progress, 0);
           break;
         case 'black-white':
-          // Per il black & white, l'intensità è sempre 1 (completamente attivo)
-          intensity = 1;
+          intensity = 1; // Sempre attivo
           break;
         case 'zoom-in':
-          // Zoom in: scala da 1.0 al valore finale basato sull'intensità dell'effetto
-          const zoomInIntensity = effect.mediaFile.effectIntensity || 50;
-          const maxScale = 1 + (zoomInIntensity / 100) * 2; // Da 1.0 a 3.0
-          intensity = 1 + (progress * (maxScale - 1)); // Progressivo da 1 a maxScale
-          break;
         case 'zoom-out':
-          // Zoom out: scala dal valore iniziale a 1.0
-          const zoomOutIntensity = effect.mediaFile.effectIntensity || 50;
-          const startScale = 1 + (zoomOutIntensity / 100) * 2; // Da 1.0 a 3.0
-          intensity = startScale - (progress * (startScale - 1)); // Progressivo da startScale a 1
+          intensity = 1; // Per zoom usiamo sempre intensità 1, il valore zoom è calcolato separatamente
           break;
         default:
           intensity = 1;
@@ -136,22 +127,41 @@ export const CompositeVideoPlayer = ({
     return activeEffects.some(effect => effect.type === 'black-white');
   }, []);
 
-  // NUOVO: Funzione per calcolare il fattore di scala complessivo per effetti zoom
-  const calculateZoomScale = useCallback((activeEffects: ActiveEffect[]) => {
+  // AGGIORNATO: Funzione per calcolare il fattore di scala complessivo per effetti zoom
+  const calculateZoomScale = useCallback((time: number) => {
+    const activeZoomEffects = timelineItems.filter(item =>
+      item.mediaFile.type === 'effect' &&
+      (item.mediaFile.effectType === 'zoom-in' || item.mediaFile.effectType === 'zoom-out') &&
+      time >= item.startTime &&
+      time < item.startTime + item.duration
+    );
+
     let zoomScale = 1.0;
 
-    activeEffects.forEach(effect => {
-      if (effect.type === 'zoom-in' || effect.type === 'zoom-out') {
-        // Per gli effetti zoom, l'intensity contiene già il valore di scala calcolato
-        zoomScale *= effect.intensity;
+    activeZoomEffects.forEach(effect => {
+      const relativeTime = time - effect.startTime;
+      const progress = relativeTime / effect.duration; // 0 a 1
+      const effectIntensity = effect.mediaFile.effectIntensity || 50;
+
+      // Converte la percentuale (0-100) in fattore di scala (1.0-3.0)
+      const maxZoomFactor = 1 + (effectIntensity / 100) * 2; // 0% = 1.0x, 100% = 3.0x
+
+      if (effect.mediaFile.effectType === 'zoom-in') {
+        // Zoom in: scala progressivamente da 1.0 al valore finale
+        const currentScale = 1 + (progress * (maxZoomFactor - 1));
+        zoomScale *= currentScale;
+      } else if (effect.mediaFile.effectType === 'zoom-out') {
+        // Zoom out: scala progressivamente dal valore iniziale a 1.0
+        const currentScale = maxZoomFactor - (progress * (maxZoomFactor - 1));
+        zoomScale *= currentScale;
       }
     });
 
     return Math.max(0.1, Math.min(5.0, zoomScale)); // Limita tra 0.1x e 5.0x
-  }, []);
+  }, [timelineItems]);
 
-  // AGGIORNATO: Funzione per renderizzare indicatori degli effetti con supporto zoom
-  const renderEffectIndicators = useCallback((ctx: CanvasRenderingContext2D, canvasWidth: number, canvasHeight: number, activeEffects: ActiveEffect[]) => {
+  // AGGIORNATO: Funzione per renderizzare indicatori degli effetti con supporto zoom corretto
+  const renderEffectIndicators = useCallback((ctx: CanvasRenderingContext2D, canvasWidth: number, canvasHeight: number, activeEffects: ActiveEffect[], currentTime: number) => {
     if (activeEffects.length === 0) return;
 
     // Salva il contesto per gli indicatori
@@ -185,14 +195,16 @@ export const CompositeVideoPlayer = ({
       // Testo specifico per tipo di effetto
       let displayText = `${effect.name} (${(effect.progress * 100).toFixed(0)}%)`;
       if (effect.type === 'zoom-in' || effect.type === 'zoom-out') {
-        displayText = `${effect.name} (${effect.intensity.toFixed(2)}x)`;
+        // Per zoom, calcola il valore corrente basato sul tempo
+        const currentZoom = calculateZoomScale(currentTime);
+        displayText = `${effect.name} (${currentZoom.toFixed(2)}x)`;
       }
       
       ctx.fillText(displayText, 15, textY);
     });
 
     ctx.restore();
-  }, []);
+  }, [calculateZoomScale]);
 
   // OTTIMIZZAZIONE: Throttled render function
   const renderComposite = useCallback(() => {
@@ -232,7 +244,7 @@ export const CompositeVideoPlayer = ({
     const activeEffects = calculateActiveEffects(currentTime);
     const globalAlpha = calculateGlobalAlpha(activeEffects);
     const blackWhiteActive = isBlackWhiteActive(activeEffects);
-    const zoomScale = calculateZoomScale(activeEffects);
+    const zoomScale = calculateZoomScale(currentTime); // AGGIORNATO: passa il tempo invece degli effetti
     
     // Separa gli elementi media dagli effetti
     const mediaItems = activeItems.filter(item => item.mediaFile.type !== 'effect');
@@ -360,7 +372,7 @@ export const CompositeVideoPlayer = ({
     ctx.restore();
 
     // Renderizza gli indicatori degli effetti sopra tutto (solo per preview)
-    renderEffectIndicators(ctx, canvas.width, canvas.height, activeEffects);
+    renderEffectIndicators(ctx, canvas.width, canvas.height, activeEffects, currentTime);
   }, [activeItems, currentTime, canvasDimensions, calculateActiveEffects, calculateGlobalAlpha, isBlackWhiteActive, calculateZoomScale, renderEffectIndicators]);
 
   // AGGIORNATO: Gestione elementi media migliorata - ora gestisce anche gli effetti
