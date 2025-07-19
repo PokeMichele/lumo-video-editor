@@ -220,16 +220,25 @@ export const ExportDialog = ({
           video.src = item.mediaFile.url;
           video.crossOrigin = 'anonymous';
           video.muted = false; // CORRETTO: Non mutare per includere l'audio nell'export
-          const itemVolume = trackVolumes.get(item.id) ?? 100;
-          video.volume = itemVolume / 100; // Usa il volume specifico dell'elemento
           video.preload = 'auto';
           video.playsInline = true;
+          
+          // SICUREZZA: Imposta il volume solo quando l'elemento è pronto
+          const setInitialVolume = () => {
+            try {
+              const itemVolume = trackVolumes.get(item.id) ?? 100;
+              video.volume = Math.max(0, Math.min(1, itemVolume / 100));
+            } catch (error) {
+              console.warn(`Error setting export video volume for ${item.id}:`, error);
+            }
+          };
           
           const handleLoad = () => {
             video.removeEventListener('canplaythrough', handleLoad);
             video.removeEventListener('error', handleError);
             if (!cancelledRef.current) {
               cache.videos.set(item.id, video);
+              setInitialVolume(); // Imposta il volume quando è pronto
             }
             resolve();
           };
@@ -262,11 +271,22 @@ export const ExportDialog = ({
           audio.crossOrigin = 'anonymous';
           audio.preload = 'auto';
           
+          // SICUREZZA: Imposta il volume solo quando l'elemento è pronto
+          const setInitialVolume = () => {
+            try {
+              const itemVolume = trackVolumes.get(item.id) ?? 100;
+              audio.volume = Math.max(0, Math.min(1, itemVolume / 100));
+            } catch (error) {
+              console.warn(`Error setting export audio volume for ${item.id}:`, error);
+            }
+          };
+          
           const handleLoad = () => {
             audio.removeEventListener('canplaythrough', handleLoad);
             audio.removeEventListener('error', handleError);
             if (!cancelledRef.current) {
               cache.audios.set(item.id, audio);
+              setInitialVolume(); // Imposta il volume quando è pronto
             }
             resolve();
           };
@@ -574,22 +594,28 @@ export const ExportDialog = ({
         const targetTime = relativeTime + mediaOffset;
 
         if (targetTime >= 0 && targetTime <= node.element.duration) {
-          // CORRETTO: Assicurati che l'elemento non sia mutato
-          node.element.muted = false;
-          const itemVolume = trackVolumes.get(item.id) ?? 100;
-          node.element.volume = itemVolume / 100;
-          
-          if (Math.abs(node.element.currentTime - targetTime) > 0.05) {
-            node.element.currentTime = targetTime;
+          try {
+            // CORRETTO: Assicurati che l'elemento non sia mutato
+            node.element.muted = false;
+            const itemVolume = trackVolumes.get(item.id) ?? 100;
+            node.element.volume = Math.max(0, Math.min(1, itemVolume / 100));
+            
+            if (Math.abs(node.element.currentTime - targetTime) > 0.05) {
+              node.element.currentTime = Math.max(0, targetTime);
+            }
+            
+            if (node.element.paused) {
+              node.element.play().catch(() => {});
+            }
+            
+            // Applica effetti fade anche all'audio con volume individuale
+            const globalAlpha = calculateGlobalAlpha(time);
+            node.gainNode.gain.value = Math.max(0, Math.min(1, (itemVolume / 100) * globalAlpha));
+          } catch (error) {
+            console.warn(`Error syncing audio for export:`, error);
+            node.element.pause();
+            node.gainNode.gain.value = 0;
           }
-          
-          if (node.element.paused) {
-            node.element.play().catch(() => {});
-          }
-          
-          // Applica effetti fade anche all'audio con volume individuale
-          const globalAlpha = calculateGlobalAlpha(time);
-          node.gainNode.gain.value = (itemVolume / 100) * globalAlpha;
         } else {
           node.element.pause();
           node.gainNode.gain.value = 0;

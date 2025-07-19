@@ -450,41 +450,72 @@ export const CompositeVideoPlayer = ({
 
     // Crea solo elementi nuovi (escludendo gli effetti che non hanno elementi media)
     timelineItems.forEach(item => {
-      if (item.mediaFile.type === 'video' && !videoElementsRef.current.has(item.id)) {
-        const video = document.createElement('video');
-        video.src = item.mediaFile.url;
-        video.crossOrigin = 'anonymous';
-        video.muted = false;
-        const itemVolume = trackVolumes.get(item.id) ?? 100;
-        video.volume = (itemVolume / 100) * (volume / 100);
-        video.style.display = 'none';
-        video.preload = 'metadata';
-        
-        // OTTIMIZZAZIONE: Previeni eventi automatici
-        video.addEventListener('timeupdate', (e) => e.stopPropagation());
-        
-        container.appendChild(video);
-        videoElementsRef.current.set(item.id, video);
-      } else if (item.mediaFile.type === 'audio' && !audioElementsRef.current.has(item.id)) {
-        const audio = document.createElement('audio');
-        audio.src = item.mediaFile.url;
-        audio.crossOrigin = 'anonymous';
-        audio.muted = false;
-        const itemVolume = trackVolumes.get(item.id) ?? 100;
-        audio.volume = (itemVolume / 100) * (volume / 100);
-        audio.preload = 'metadata';
-        
-        audio.addEventListener('timeupdate', (e) => e.stopPropagation());
-        
-        container.appendChild(audio);
-        audioElementsRef.current.set(item.id, audio);
-      } else if (item.mediaFile.type === 'image' && !imageElementsRef.current.has(item.id)) {
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.src = item.mediaFile.url;
-        imageElementsRef.current.set(item.id, img);
+      try {
+        if (item.mediaFile.type === 'video' && !videoElementsRef.current.has(item.id)) {
+          const video = document.createElement('video');
+          video.src = item.mediaFile.url;
+          video.crossOrigin = 'anonymous';
+          video.muted = false;
+          video.style.display = 'none';
+          video.preload = 'metadata';
+          
+          // SICUREZZA: Imposta il volume solo dopo che l'elemento è pronto
+          const setInitialVolume = () => {
+            try {
+              const itemVolume = trackVolumes.get(item.id) ?? 100;
+              video.volume = Math.max(0, Math.min(1, (itemVolume / 100) * (volume / 100)));
+            } catch (error) {
+              console.warn(`Error setting initial video volume for ${item.id}:`, error);
+            }
+          };
+          
+          video.addEventListener('loadedmetadata', setInitialVolume);
+          video.addEventListener('canplay', setInitialVolume);
+          
+          // OTTIMIZZAZIONE: Previeni eventi automatici
+          video.addEventListener('timeupdate', (e) => e.stopPropagation());
+          
+          container.appendChild(video);
+          videoElementsRef.current.set(item.id, video);
+          
+          // Imposta il volume immediatamente se possibile
+          setInitialVolume();
+        } else if (item.mediaFile.type === 'audio' && !audioElementsRef.current.has(item.id)) {
+          const audio = document.createElement('audio');
+          audio.src = item.mediaFile.url;
+          audio.crossOrigin = 'anonymous';
+          audio.muted = false;
+          audio.preload = 'metadata';
+          
+          // SICUREZZA: Imposta il volume solo dopo che l'elemento è pronto
+          const setInitialVolume = () => {
+            try {
+              const itemVolume = trackVolumes.get(item.id) ?? 100;
+              audio.volume = Math.max(0, Math.min(1, (itemVolume / 100) * (volume / 100)));
+            } catch (error) {
+              console.warn(`Error setting initial audio volume for ${item.id}:`, error);
+            }
+          };
+          
+          audio.addEventListener('loadedmetadata', setInitialVolume);
+          audio.addEventListener('canplay', setInitialVolume);
+          audio.addEventListener('timeupdate', (e) => e.stopPropagation());
+          
+          container.appendChild(audio);
+          audioElementsRef.current.set(item.id, audio);
+          
+          // Imposta il volume immediatamente se possibile
+          setInitialVolume();
+        } else if (item.mediaFile.type === 'image' && !imageElementsRef.current.has(item.id)) {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.src = item.mediaFile.url;
+          imageElementsRef.current.set(item.id, img);
+        }
+        // Gli effetti non creano elementi media, vengono gestiti direttamente nel rendering
+      } catch (error) {
+        console.error(`Error creating media element for ${item.id}:`, error);
       }
-      // Gli effetti non creano elementi media, vengono gestiti direttamente nel rendering
     });
   }, [timelineItems, volume, trackVolumes]);
 
@@ -497,54 +528,70 @@ export const CompositeVideoPlayer = ({
     
     // Gestisci video
     videoElementsRef.current.forEach((video, itemId) => {
-      const item = activeMediaItems.find(item => item.id === itemId);
-      if (item) {
-        const relativeTime = currentTime - item.startTime;
-        const mediaOffset = item.mediaStartOffset || 0;
-        const targetTime = relativeTime + mediaOffset;
+      try {
+        const item = activeMediaItems.find(item => item.id === itemId);
+        if (item && video && !video.error) {
+          const relativeTime = currentTime - item.startTime;
+          const mediaOffset = item.mediaStartOffset || 0;
+          const targetTime = relativeTime + mediaOffset;
 
-        // OTTIMIZZAZIONE: Sync solo quando necessario
-        if (Math.abs(video.currentTime - targetTime) > syncTolerance) {
-          video.currentTime = targetTime;
-        }
-
-        if (isPlaying && targetTime >= 0 && targetTime <= video.duration) {
-          const itemVolume = trackVolumes.get(itemId) ?? 100;
-          video.volume = (itemVolume / 100) * (volume / 100);
-          if (video.paused) {
-            video.play().catch(e => console.warn('Video play failed:', e));
+          // OTTIMIZZAZIONE: Sync solo quando necessario
+          if (Math.abs(video.currentTime - targetTime) > syncTolerance) {
+            video.currentTime = Math.max(0, targetTime);
           }
-        } else if (!video.paused) {
+
+          if (isPlaying && targetTime >= 0 && targetTime <= video.duration && video.readyState >= 2) {
+            try {
+              const itemVolume = trackVolumes.get(itemId) ?? 100;
+              video.volume = Math.max(0, Math.min(1, (itemVolume / 100) * (volume / 100)));
+              if (video.paused) {
+                video.play().catch(e => console.warn('Video play failed:', e));
+              }
+            } catch (volumeError) {
+              console.warn(`Error setting video volume for ${itemId}:`, volumeError);
+            }
+          } else if (!video.paused) {
+            video.pause();
+          }
+        } else if (video && !video.paused) {
           video.pause();
         }
-      } else if (!video.paused) {
-        video.pause();
+      } catch (error) {
+        console.warn(`Error handling video ${itemId}:`, error);
       }
     });
 
     // Gestisci audio
     audioElementsRef.current.forEach((audio, itemId) => {
-      const item = activeMediaItems.find(item => item.id === itemId);
-      if (item) {
-        const relativeTime = currentTime - item.startTime;
-        const mediaOffset = item.mediaStartOffset || 0;
-        const targetTime = relativeTime + mediaOffset;
+      try {
+        const item = activeMediaItems.find(item => item.id === itemId);
+        if (item && audio && !audio.error) {
+          const relativeTime = currentTime - item.startTime;
+          const mediaOffset = item.mediaStartOffset || 0;
+          const targetTime = relativeTime + mediaOffset;
 
-        if (Math.abs(audio.currentTime - targetTime) > syncTolerance) {
-          audio.currentTime = targetTime;
-        }
-
-        if (isPlaying && targetTime >= 0 && targetTime <= audio.duration) {
-          const itemVolume = trackVolumes.get(itemId) ?? 100;
-          audio.volume = (itemVolume / 100) * (volume / 100);
-          if (audio.paused) {
-            audio.play().catch(e => console.warn('Audio play failed:', e));
+          if (Math.abs(audio.currentTime - targetTime) > syncTolerance) {
+            audio.currentTime = Math.max(0, targetTime);
           }
-        } else if (!audio.paused) {
+
+          if (isPlaying && targetTime >= 0 && targetTime <= audio.duration && audio.readyState >= 2) {
+            try {
+              const itemVolume = trackVolumes.get(itemId) ?? 100;
+              audio.volume = Math.max(0, Math.min(1, (itemVolume / 100) * (volume / 100)));
+              if (audio.paused) {
+                audio.play().catch(e => console.warn('Audio play failed:', e));
+              }
+            } catch (volumeError) {
+              console.warn(`Error setting audio volume for ${itemId}:`, volumeError);
+            }
+          } else if (!audio.paused) {
+            audio.pause();
+          }
+        } else if (audio && !audio.paused) {
           audio.pause();
         }
-      } else if (!audio.paused) {
-        audio.pause();
+      } catch (error) {
+        console.warn(`Error handling audio ${itemId}:`, error);
       }
     });
 
@@ -611,16 +658,33 @@ export const CompositeVideoPlayer = ({
     const newVolume = value[0];
     setVolume(newVolume);
     
-    // OTTIMIZZAZIONE: Batch update del volume con volumi individuali
-    const volumeDecimal = newVolume / 100;
-    videoElementsRef.current.forEach((video, itemId) => {
-      const itemVolume = trackVolumes.get(itemId) ?? 100;
-      video.volume = (itemVolume / 100) * volumeDecimal;
-    });
-    audioElementsRef.current.forEach((audio, itemId) => {
-      const itemVolume = trackVolumes.get(itemId) ?? 100;
-      audio.volume = (itemVolume / 100) * volumeDecimal;
-    });
+    // SICUREZZA: Batch update del volume con controlli di sicurezza
+    try {
+      const volumeDecimal = newVolume / 100;
+      videoElementsRef.current.forEach((video, itemId) => {
+        try {
+          if (video && !video.error && video.readyState > 0) {
+            const itemVolume = trackVolumes.get(itemId) ?? 100;
+            video.volume = Math.max(0, Math.min(1, (itemVolume / 100) * volumeDecimal));
+          }
+        } catch (error) {
+          console.warn(`Error updating video volume for ${itemId}:`, error);
+        }
+      });
+      
+      audioElementsRef.current.forEach((audio, itemId) => {
+        try {
+          if (audio && !audio.error && audio.readyState > 0) {
+            const itemVolume = trackVolumes.get(itemId) ?? 100;
+            audio.volume = Math.max(0, Math.min(1, (itemVolume / 100) * volumeDecimal));
+          }
+        } catch (error) {
+          console.warn(`Error updating audio volume for ${itemId}:`, error);
+        }
+      });
+    } catch (error) {
+      console.error('Error in handleVolumeChange:', error);
+    }
   };
 
   const formatTime = (seconds: number) => {

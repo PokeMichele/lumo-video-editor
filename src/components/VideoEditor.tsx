@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { FilesBrowser } from "./FilesBrowser";
 import { CompositeVideoPlayer } from "./CompositeVideoPlayer";
 import { Timeline, Track } from "./Timeline";
@@ -48,6 +48,9 @@ export const VideoEditor = () => {
   const [isAudioMixerOpen, setIsAudioMixerOpen] = useState(false);
   const [selectedTimelineItemId, setSelectedTimelineItemId] = useState<string | undefined>();
   const [trackVolumes, setTrackVolumes] = useState<Map<string, number>>(new Map());
+  
+  // Throttling per aggiornamenti volume
+  const volumeUpdateTimeoutRef = useRef<Map<string, number>>(new Map());
 
   // Gestione tracce dinamiche
   const [tracks, setTracks] = useState<Track[]>([
@@ -55,6 +58,16 @@ export const VideoEditor = () => {
     { id: 'audio-0', type: 'audio', index: 1, label: 'Audio 1' },
     { id: 'audio-1', type: 'audio', index: 2, label: 'Audio 2' }
   ]);
+
+  // Cleanup per i timeout dei volumi
+  useEffect(() => {
+    return () => {
+      volumeUpdateTimeoutRef.current.forEach(timeoutId => {
+        clearTimeout(timeoutId);
+      });
+      volumeUpdateTimeoutRef.current.clear();
+    };
+  }, []);
 
   const { toast } = useToast();
 
@@ -179,13 +192,27 @@ export const VideoEditor = () => {
     setIsAudioMixerOpen(true);
   };
 
-  const handleVolumeChange = (itemId: string, volume: number) => {
+  const handleVolumeChange = useCallback((itemId: string, volume: number) => {
+    // Aggiorna immediatamente lo stato per feedback UI immediato
     setTrackVolumes(prev => {
       const newMap = new Map(prev);
       newMap.set(itemId, volume);
       return newMap;
     });
-  };
+
+    // Throttling per evitare troppi aggiornamenti rapidamente
+    const timeoutMap = volumeUpdateTimeoutRef.current;
+    if (timeoutMap.has(itemId)) {
+      clearTimeout(timeoutMap.get(itemId));
+    }
+
+    const timeoutId = setTimeout(() => {
+      // Questo timeout permette agli elementi media di processare il cambio volume
+      timeoutMap.delete(itemId);
+    }, 50); // 50ms di throttling
+
+    timeoutMap.set(itemId, timeoutId);
+  }, []);
 
   const handleResetVolumes = () => {
     setTrackVolumes(new Map());

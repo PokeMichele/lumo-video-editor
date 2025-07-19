@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -22,6 +22,37 @@ export const AudioMixerDialog = ({
   onVolumeChange,
   onResetVolumes
 }: AudioMixerDialogProps) => {
+  // Stili CSS per nascondere il thumb degli slider
+  useEffect(() => {
+    const style = document.createElement('style');
+    style.textContent = `
+      .audio-mixer-slider .slider-thumb {
+        display: none !important;
+        opacity: 0 !important;
+        width: 0 !important;
+        height: 0 !important;
+      }
+      .audio-mixer-slider [role="slider"] {
+        display: none !important;
+        opacity: 0 !important;
+        width: 0 !important;
+        height: 0 !important;
+      }
+      .audio-mixer-slider .slider-track {
+        background: transparent !important;
+      }
+      .audio-mixer-slider .slider-range {
+        display: none !important;
+      }
+    `;
+    document.head.appendChild(style);
+
+    return () => {
+      if (document.head.contains(style)) {
+        document.head.removeChild(style);
+      }
+    };
+  }, []);
   // Filtra solo gli elementi che hanno audio
   const audioItems = timelineItems.filter(item => 
     item.mediaFile.type === 'video' || item.mediaFile.type === 'audio'
@@ -190,7 +221,7 @@ export const AudioMixerDialog = ({
                               min={0}
                               step={1}
                               orientation="vertical"
-                              className="absolute inset-0 h-full z-20"
+                              className="absolute inset-0 h-full z-20 audio-mixer-slider"
                             />
                           </div>
 
