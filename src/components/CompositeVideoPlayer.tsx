@@ -12,6 +12,7 @@ interface CompositeVideoPlayerProps {
   onTimeUpdate: (time: number) => void;
   onPlayStateChange: (playing: boolean) => void;
   aspectRatio: '16:9' | '4:3' | '9:16';
+  trackVolumes: Map<string, number>; // itemId -> volume (0-200)
 }
 
 // AGGIORNATO: Interfaccia per gestire tutti gli effetti attivi
@@ -29,7 +30,8 @@ export const CompositeVideoPlayer = ({
   isPlaying,
   onTimeUpdate,
   onPlayStateChange,
-  aspectRatio
+  aspectRatio,
+  trackVolumes
 }: CompositeVideoPlayerProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hiddenVideoContainerRef = useRef<HTMLDivElement>(null);
@@ -453,7 +455,8 @@ export const CompositeVideoPlayer = ({
         video.src = item.mediaFile.url;
         video.crossOrigin = 'anonymous';
         video.muted = false;
-        video.volume = volume / 100;
+        const itemVolume = trackVolumes.get(item.id) ?? 100;
+        video.volume = (itemVolume / 100) * (volume / 100);
         video.style.display = 'none';
         video.preload = 'metadata';
         
@@ -467,7 +470,8 @@ export const CompositeVideoPlayer = ({
         audio.src = item.mediaFile.url;
         audio.crossOrigin = 'anonymous';
         audio.muted = false;
-        audio.volume = volume / 100;
+        const itemVolume = trackVolumes.get(item.id) ?? 100;
+        audio.volume = (itemVolume / 100) * (volume / 100);
         audio.preload = 'metadata';
         
         audio.addEventListener('timeupdate', (e) => e.stopPropagation());
@@ -482,7 +486,7 @@ export const CompositeVideoPlayer = ({
       }
       // Gli effetti non creano elementi media, vengono gestiti direttamente nel rendering
     });
-  }, [timelineItems, volume]);
+  }, [timelineItems, volume, trackVolumes]);
 
   // OTTIMIZZAZIONE: Sincronizzazione media migliorata
   useEffect(() => {
@@ -505,7 +509,8 @@ export const CompositeVideoPlayer = ({
         }
 
         if (isPlaying && targetTime >= 0 && targetTime <= video.duration) {
-          video.volume = volume / 100;
+          const itemVolume = trackVolumes.get(itemId) ?? 100;
+          video.volume = (itemVolume / 100) * (volume / 100);
           if (video.paused) {
             video.play().catch(e => console.warn('Video play failed:', e));
           }
@@ -530,7 +535,8 @@ export const CompositeVideoPlayer = ({
         }
 
         if (isPlaying && targetTime >= 0 && targetTime <= audio.duration) {
-          audio.volume = volume / 100;
+          const itemVolume = trackVolumes.get(itemId) ?? 100;
+          audio.volume = (itemVolume / 100) * (volume / 100);
           if (audio.paused) {
             audio.play().catch(e => console.warn('Audio play failed:', e));
           }
@@ -544,7 +550,7 @@ export const CompositeVideoPlayer = ({
 
     // Marca per re-render
     needsRenderRef.current = true;
-  }, [isPlaying, activeItems, currentTime, volume]);
+  }, [isPlaying, activeItems, currentTime, volume, trackVolumes]);
 
   // OTTIMIZZAZIONE: Animation loop migliorato con timing reale
   useEffect(() => {
@@ -605,13 +611,15 @@ export const CompositeVideoPlayer = ({
     const newVolume = value[0];
     setVolume(newVolume);
     
-    // OTTIMIZZAZIONE: Batch update del volume
+    // OTTIMIZZAZIONE: Batch update del volume con volumi individuali
     const volumeDecimal = newVolume / 100;
-    videoElementsRef.current.forEach(video => {
-      video.volume = volumeDecimal;
+    videoElementsRef.current.forEach((video, itemId) => {
+      const itemVolume = trackVolumes.get(itemId) ?? 100;
+      video.volume = (itemVolume / 100) * volumeDecimal;
     });
-    audioElementsRef.current.forEach(audio => {
-      audio.volume = volumeDecimal;
+    audioElementsRef.current.forEach((audio, itemId) => {
+      const itemVolume = trackVolumes.get(itemId) ?? 100;
+      audio.volume = (itemVolume / 100) * volumeDecimal;
     });
   };
 

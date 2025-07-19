@@ -4,6 +4,7 @@ import { CompositeVideoPlayer } from "./CompositeVideoPlayer";
 import { Timeline, Track } from "./Timeline";
 import { ExportDialog } from "./ExportDialog";
 import { EffectsDialog } from "./EffectsDialog";
+import { AudioMixerDialog } from "./AudioMixerDialog";
 import { Button } from "@/components/ui/button";
 import { Download } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -44,7 +45,9 @@ export const VideoEditor = () => {
   const [exportFPS, setExportFPS] = useState<24 | 30 | 60>(30); // Nuovo state per FPS
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
   const [isEffectsDialogOpen, setIsEffectsDialogOpen] = useState(false);
+  const [isAudioMixerOpen, setIsAudioMixerOpen] = useState(false);
   const [selectedTimelineItemId, setSelectedTimelineItemId] = useState<string | undefined>();
+  const [trackVolumes, setTrackVolumes] = useState<Map<string, number>>(new Map());
 
   // Gestione tracce dinamiche
   const [tracks, setTracks] = useState<Track[]>([
@@ -170,6 +173,22 @@ export const VideoEditor = () => {
 
   const handleOpenEffects = () => {
     setIsEffectsDialogOpen(true);
+  };
+
+  const handleOpenAudioMixer = () => {
+    setIsAudioMixerOpen(true);
+  };
+
+  const handleVolumeChange = (itemId: string, volume: number) => {
+    setTrackVolumes(prev => {
+      const newMap = new Map(prev);
+      newMap.set(itemId, volume);
+      return newMap;
+    });
+  };
+
+  const handleResetVolumes = () => {
+    setTrackVolumes(new Map());
   };
 
   // AGGIORNATO: Funzione per applicare effetti con durate dinamiche e intensità (incluso Blur)
@@ -327,6 +346,7 @@ export const VideoEditor = () => {
                 onTimeUpdate={setCurrentTime}
                 onPlayStateChange={setIsPlaying}
                 aspectRatio={aspectRatio}
+                trackVolumes={trackVolumes}
               />
             </div>
           </div>
@@ -337,7 +357,7 @@ export const VideoEditor = () => {
               <span className="text-sm font-medium text-muted-foreground">Quick Tools:</span>
               <Button variant="outline" size="sm" onClick={handleOpenEffects}>Effects</Button>
               <Button variant="outline" size="sm">Colors</Button>
-              <Button variant="outline" size="sm">Audio Mixer</Button>
+              <Button variant="outline" size="sm" onClick={handleOpenAudioMixer}>Audio Mixer</Button>
             </div>
           </div>
         </div>
@@ -366,6 +386,7 @@ export const VideoEditor = () => {
         totalDuration={totalDuration}
         aspectRatio={aspectRatio}
         selectedFPS={exportFPS}
+        trackVolumes={trackVolumes}
       />
 
       {/* Effects Dialog */}
@@ -375,6 +396,16 @@ export const VideoEditor = () => {
         timelineItems={timelineItems}
         selectedItemId={selectedTimelineItemId}
         onApplyEffect={handleApplyEffect}
+      />
+
+      {/* Audio Mixer Dialog */}
+      <AudioMixerDialog
+        isOpen={isAudioMixerOpen}
+        onClose={() => setIsAudioMixerOpen(false)}
+        timelineItems={timelineItems}
+        trackVolumes={trackVolumes}
+        onVolumeChange={handleVolumeChange}
+        onResetVolumes={handleResetVolumes}
       />
     </div>
   );

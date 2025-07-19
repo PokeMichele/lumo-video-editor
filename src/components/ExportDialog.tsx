@@ -12,6 +12,7 @@ interface ExportDialogProps {
   totalDuration: number;
   aspectRatio: '16:9' | '4:3' | '9:16';
   selectedFPS: 24 | 30 | 60; // Nuovo parametro per FPS selezionati
+  trackVolumes: Map<string, number>; // itemId -> volume (0-200)
 }
 
 interface MediaElementCache {
@@ -26,7 +27,8 @@ export const ExportDialog = ({
   timelineItems, 
   totalDuration, 
   aspectRatio,
-  selectedFPS 
+  selectedFPS,
+  trackVolumes 
 }: ExportDialogProps) => {
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState<'preparing' | 'rendering' | 'completed' | 'error'>('preparing');
@@ -218,7 +220,8 @@ export const ExportDialog = ({
           video.src = item.mediaFile.url;
           video.crossOrigin = 'anonymous';
           video.muted = false; // CORRETTO: Non mutare per includere l'audio nell'export
-          video.volume = 1.0; // Volume massimo per l'export
+          const itemVolume = trackVolumes.get(item.id) ?? 100;
+          video.volume = itemVolume / 100; // Usa il volume specifico dell'elemento
           video.preload = 'auto';
           video.playsInline = true;
           
@@ -320,7 +323,7 @@ export const ExportDialog = ({
       const batch = loadPromises.slice(i, i + batchSize);
       await Promise.all(batch);
     }
-  }, [timelineItems]);
+  }, [timelineItems, trackVolumes]);
 
   // OTTIMIZZAZIONE: Gestione audio migliorata con Web Audio API
   const setupAudioContext = useCallback(async () => {
@@ -347,11 +350,12 @@ export const ExportDialog = ({
             if (element) {
               // Assicurati che l'elemento non sia mutato
               element.muted = false;
-              element.volume = 1.0;
+              const itemVolume = trackVolumes.get(item.id) ?? 100;
+              element.volume = itemVolume / 100; // Usa il volume specifico dell'elemento
               
               const source = audioContext.createMediaElementSource(element);
               const gainNode = audioContext.createGain();
-              gainNode.gain.value = 1.0;
+              gainNode.gain.value = itemVolume / 100; // Applica anche al gain node
               
               source.connect(gainNode);
               gainNode.connect(masterGain);
@@ -372,7 +376,7 @@ export const ExportDialog = ({
       console.error('Failed to setup audio context:', error);
       return null;
     }
-  }, [timelineItems]);
+  }, [timelineItems, trackVolumes]);
 
   // AGGIORNATO: Render frame migliorato con supporto completo per tutti gli effetti incluso Blur
   const renderFrame = useCallback(async (time: number, ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement) => {
@@ -572,7 +576,8 @@ export const ExportDialog = ({
         if (targetTime >= 0 && targetTime <= node.element.duration) {
           // CORRETTO: Assicurati che l'elemento non sia mutato
           node.element.muted = false;
-          node.element.volume = 1.0;
+          const itemVolume = trackVolumes.get(item.id) ?? 100;
+          node.element.volume = itemVolume / 100;
           
           if (Math.abs(node.element.currentTime - targetTime) > 0.05) {
             node.element.currentTime = targetTime;
@@ -582,9 +587,9 @@ export const ExportDialog = ({
             node.element.play().catch(() => {});
           }
           
-          // Applica effetti fade anche all'audio
+          // Applica effetti fade anche all'audio con volume individuale
           const globalAlpha = calculateGlobalAlpha(time);
-          node.gainNode.gain.value = globalAlpha;
+          node.gainNode.gain.value = (itemVolume / 100) * globalAlpha;
         } else {
           node.element.pause();
           node.gainNode.gain.value = 0;
@@ -594,7 +599,7 @@ export const ExportDialog = ({
         node.gainNode.gain.value = 0;
       }
     });
-  }, [timelineItems, calculateGlobalAlpha]);
+  }, [timelineItems, calculateGlobalAlpha, trackVolumes]);
 
   // OTTIMIZZAZIONE: Cleanup completo delle risorse
   const cleanupResources = useCallback(() => {
